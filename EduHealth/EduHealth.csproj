@@ -1,0 +1,54 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.5" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Common\Constants\" />
+    <Folder Include="Common\Enums\" />
+    <Folder Include="Common\Exceptions\" />
+    <Folder Include="Common\Responses\" />
+    <Folder Include="Data\Migrations\" />
+    <Folder Include="DTOs\HealthProfiles\" />
+    <Folder Include="DTOs\Medicines\" />
+    <Folder Include="DTOs\Inventory\" />
+    <Folder Include="DTOs\Examinations\" />
+    <Folder Include="DTOs\Grades\" />
+    <Folder Include="DTOs\Classes\" />
+    <Folder Include="DTOs\Allergies\" />
+    <Folder Include="DTOs\Diseases\" />
+    <Folder Include="DTOs\Alerts\" />
+    <Folder Include="DTOs\News\" />
+    <Folder Include="DTOs\Reports\" />
+    <Folder Include="DTOs\Vaccinations\" />
+    <Folder Include="DTOs\Students\" />
+    <Folder Include="DTOs\Users\" />
+    <Folder Include="Extensions\" />
+    <Folder Include="Middleware\" />
+    <Folder Include="Mapping\" />
+    <Folder Include="Validators\Auth\" />
+    <Folder Include="Validators\Medicines\" />
+    <Folder Include="Validators\Examinations\" />
+    <Folder Include="Validators\Vaccinations\" />
+    <Folder Include="Validators\Students\" />
+  </ItemGroup>
+
+</Project>
