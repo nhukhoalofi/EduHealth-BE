@@ -1,0 +1,25 @@
+﻿@model List<Student>
+
+<h2>Test DB - Students</h2>
+
+<table class="table table-bordered">
+    <thead>
+        <tr>
+            <th>StudentId</th>
+            <th>FullName</th>
+            <th>ClassId</th>
+            <th>DOB</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var s in Model)
+        {
+            <tr>
+                <td>@s.StudentId</td>
+                <td>@s.FullName</td>
+                <td>@s.ClassId</td>
+                <td>@(s.Dob?.ToString("yyyy-MM-dd"))</td>
+            </tr>
+        }
+    </tbody>
+</table>
