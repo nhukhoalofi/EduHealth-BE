@@ -22,7 +22,8 @@ namespace EduHealth.Data
         public DbSet<HealthVisit> HealthVisits => Set<HealthVisit>();
         public DbSet<VisitPrescription> VisitPrescriptions => Set<VisitPrescription>();
         public DbSet<MedicineStockLog> MedicineStockLogs => Set<MedicineStockLog>();
-        public DbSet<SystemAlert> SystemAlerts => Set<SystemAlert>();
+        public DbSet<Notification> Notifications => Set<Notification>();
+        public DbSet<NotificationRecipient> NotificationRecipients => Set<NotificationRecipient>();
         public DbSet<PasswordResetOtp> PasswordResetOtps => Set<PasswordResetOtp>();
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

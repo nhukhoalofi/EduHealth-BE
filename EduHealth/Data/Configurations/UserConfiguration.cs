@@ -15,6 +15,14 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.UserId)
                 .ValueGeneratedOnAdd();
 
+            builder.Property(x => x.Code)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            builder.Property(x => x.Username)
+                .HasMaxLength(50)
+                .IsRequired();
+
             builder.Property(x => x.Phone)
                 .HasMaxLength(20)
                 .IsRequired();
@@ -28,6 +36,24 @@ namespace EduHealth.Data.Configurations
                 .IsRequired();
 
             builder.Property(x => x.IsActive)
+                .IsRequired();
+
+            builder.Property(x => x.Status)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            builder.Property(x => x.LockReason)
+                .HasMaxLength(500);
+
+            builder.Property(x => x.LastLoginAt)
+                .HasColumnType("datetime");
+
+            builder.Property(x => x.CreatedAt)
+                .HasColumnType("datetime")
+                .IsRequired();
+
+            builder.Property(x => x.UpdatedAt)
+                .HasColumnType("datetime")
                 .IsRequired();
 
             builder.Property(x => x.Email)
@@ -48,6 +74,12 @@ namespace EduHealth.Data.Configurations
                 .IsUnique();
 
             builder.HasIndex(x => x.Email)
+                .IsUnique();
+
+            builder.HasIndex(x => x.Code)
+                .IsUnique();
+
+            builder.HasIndex(x => x.Username)
                 .IsUnique();
         }
     }

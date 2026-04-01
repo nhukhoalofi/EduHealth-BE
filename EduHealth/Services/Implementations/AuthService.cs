@@ -38,7 +38,7 @@ namespace EduHealth.Services.Implementations
 
             var user = await _userRepository.GetByEmailOrPhoneAsync(request.Identifier, cancellationToken);
 
-            if (user is null || !user.IsActive)
+            if (user is null || !user.IsActive || string.Equals(user.Status, "LOCKED", StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
@@ -51,6 +51,11 @@ namespace EduHealth.Services.Implementations
             }
 
             var (token, expiresAt) = _jwtHelper.GenerateToken(user);
+
+            user.LastLoginAt = DateTime.UtcNow;
+            user.UpdatedAt = DateTime.UtcNow;
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync(cancellationToken);
 
             return new LoginResponseDto
             {

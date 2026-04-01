@@ -15,6 +15,10 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.DiseaseId)
                 .ValueGeneratedOnAdd();
 
+            builder.Property(x => x.Code)
+                .HasMaxLength(20)
+                .IsRequired();
+
             builder.Property(x => x.DiseaseName)
                 .HasMaxLength(100)
                 .IsRequired();
@@ -24,6 +28,9 @@ namespace EduHealth.Data.Configurations
 
             builder.Property(x => x.StandardTreatment)
                 .HasMaxLength(1000);
+
+            builder.HasIndex(x => x.Code)
+                .IsUnique();
         }
     }
 }

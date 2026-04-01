@@ -34,7 +34,7 @@ namespace EduHealth.Helpers
             var claims = new List<Claim>
             {
                 new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
-                new(ClaimTypes.Name, user.FullName),
+                new(ClaimTypes.Name, user.Username),
                 new(ClaimTypes.Email, user.Email),
                 new(ClaimTypes.MobilePhone, user.Phone),
                 new(ClaimTypes.Role, user.Role)

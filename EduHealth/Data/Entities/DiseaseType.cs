@@ -3,6 +3,7 @@
     public class DiseaseType
     {
         public int DiseaseId { get; set; }
+        public string Code { get; set; } = null!;
         public string DiseaseName { get; set; } = null!;
         public string? Description { get; set; }
         public bool IsContagious { get; set; }

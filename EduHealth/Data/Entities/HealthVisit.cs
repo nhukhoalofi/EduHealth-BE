@@ -3,11 +3,14 @@
     public class HealthVisit
     {
         public int VisitId { get; set; }
+        public string Code { get; set; } = null!;
         public int StudentUserId { get; set; }
         public int NurseId { get; set; }
         public DateTime VisitDate { get; set; }
         public string? Symptoms { get; set; }
         public string? Diagnosis { get; set; }
+        public string? Treatment { get; set; }
+        public string? Note { get; set; }
         public float MeasuredHeight { get; set; }
         public float MeasuredWeight { get; set; }
         public int? DiseaseId { get; set; }

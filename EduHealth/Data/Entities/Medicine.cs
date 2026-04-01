@@ -3,11 +3,17 @@
     public class Medicine
     {
         public int MedicineId { get; set; }
-        public string MedicineName { get; set; } = null!;
+        public string Code { get; set; } = null!;
+        public string Name { get; set; } = null!;
+        public string? ActiveIngredient { get; set; }
+        public string Unit { get; set; } = null!;
+        public string? Packaging { get; set; }
+        public int WarningThreshold { get; set; }
         public int StockQuantity { get; set; }
-        public DateTime ExpiryDate { get; set; }
-        public string? Unit { get; set; }
-        public int? MinStockLevel { get; set; }
+        public string Status { get; set; } = "ACTIVE";
+        public string? Note { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
 
         // Navigation
         public ICollection<VisitPrescription> VisitPrescriptions { get; set; } = new List<VisitPrescription>();

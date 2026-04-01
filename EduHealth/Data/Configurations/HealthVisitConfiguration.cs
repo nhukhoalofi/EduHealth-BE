@@ -15,6 +15,10 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.VisitId)
                 .ValueGeneratedOnAdd();
 
+            builder.Property(x => x.Code)
+                .HasMaxLength(20)
+                .IsRequired();
+
             builder.Property(x => x.StudentUserId)
                 .IsRequired();
 
@@ -26,6 +30,12 @@ namespace EduHealth.Data.Configurations
                 .HasMaxLength(1000);
 
             builder.Property(x => x.Diagnosis)
+                .HasMaxLength(1000);
+
+            builder.Property(x => x.Treatment)
+                .HasMaxLength(1000);
+
+            builder.Property(x => x.Note)
                 .HasMaxLength(1000);
 
             builder.Property(x => x.MeasuredHeight);
@@ -46,6 +56,9 @@ namespace EduHealth.Data.Configurations
                 .WithMany(d => d.HealthVisits)
                 .HasForeignKey(x => x.DiseaseId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(x => x.Code)
+                .IsUnique();
         }
     }
 }

@@ -6,7 +6,11 @@
         public int MedicineId { get; set; }
         public int UserId { get; set; }
         public int Quantity { get; set; }
-        public string Reason { get; set; } = null!;
+        public int StockBefore { get; set; }
+        public int StockAfter { get; set; }
+        public string? Reason { get; set; }
+        public DateOnly? ExpiryDate { get; set; }
+        public string? BatchNumber { get; set; }
         public DateTime CreatedAt { get; set; }
         public string Type { get; set; } = null!;
         public int? VisitId { get; set; }

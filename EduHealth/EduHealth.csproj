@@ -29,9 +29,7 @@
     <Folder Include="Common\Responses\" />
     <Folder Include="Data\Migrations\" />
     <Folder Include="DTOs\HealthProfiles\" />
-    <Folder Include="DTOs\Medicines\" />
     <Folder Include="DTOs\Inventory\" />
-    <Folder Include="DTOs\Examinations\" />
     <Folder Include="DTOs\Grades\" />
     <Folder Include="DTOs\Classes\" />
     <Folder Include="DTOs\Allergies\" />
@@ -41,7 +39,6 @@
     <Folder Include="DTOs\Reports\" />
     <Folder Include="DTOs\Vaccinations\" />
     <Folder Include="DTOs\Students\" />
-    <Folder Include="DTOs\Users\" />
     <Folder Include="Extensions\" />
     <Folder Include="Middleware\" />
     <Folder Include="Mapping\" />

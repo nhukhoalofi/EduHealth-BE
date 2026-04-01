@@ -3,10 +3,17 @@
     public class User
     {
         public int UserId { get; set; }
+        public string Code { get; set; } = null!;
+        public string Username { get; set; } = null!;
         public string Phone { get; set; } = null!;
         public string Role { get; set; } = null!;
         public string FullName { get; set; } = null!;
         public bool IsActive { get; set; }
+        public string Status { get; set; } = "ACTIVE";
+        public string? LockReason { get; set; }
+        public DateTime? LastLoginAt { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
         public string Email { get; set; } = null!;
         public string PasswordHash { get; set; } = null!;
         public string? Avatar { get; set; }

@@ -18,9 +18,21 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.Quantity)
                 .IsRequired();
 
+            builder.Property(x => x.StockBefore)
+                .IsRequired();
+
+            builder.Property(x => x.StockAfter)
+                .IsRequired();
+
             builder.Property(x => x.Reason)
                 .HasMaxLength(500)
-                .IsRequired();
+                ;
+
+            builder.Property(x => x.BatchNumber)
+                .HasMaxLength(100);
+
+            builder.Property(x => x.ExpiryDate)
+                .HasColumnType("date");
 
             builder.Property(x => x.CreatedAt)
                 .HasColumnType("datetime")

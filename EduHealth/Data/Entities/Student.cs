@@ -3,6 +3,7 @@
     public class Student
     {
         public int UserId { get; set; }
+        public string Code { get; set; } = null!;
         public int ClassId { get; set; }
         public string FullName { get; set; } = null!;
         public DateTime DateOfBirth { get; set; }

@@ -15,6 +15,10 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.UserId)
                 .ValueGeneratedNever();
 
+            builder.Property(x => x.Code)
+                .HasMaxLength(20)
+                .IsRequired();
+
             builder.Property(x => x.FullName)
                 .HasMaxLength(255)
                 .IsRequired();
@@ -46,6 +50,9 @@ namespace EduHealth.Data.Configurations
                 .WithOne()
                 .HasForeignKey<Student>(x => x.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(x => x.Code)
+                .IsUnique();
         }
     }
 }
