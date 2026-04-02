@@ -11,6 +11,7 @@ namespace EduHealth.Services.Implementations
     {
         private readonly IUserRepository _userRepository;
         private readonly IPasswordResetOtpRepository _passwordResetOtpRepository;
+        private readonly IEmailSender _emailSender;
         private readonly JwtHelper _jwtHelper;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthService> _logger;
@@ -18,12 +19,14 @@ namespace EduHealth.Services.Implementations
         public AuthService(
             IUserRepository userRepository,
             IPasswordResetOtpRepository passwordResetOtpRepository,
+            IEmailSender emailSender,
             JwtHelper jwtHelper,
             IConfiguration configuration,
             ILogger<AuthService> logger)
         {
             _userRepository = userRepository;
             _passwordResetOtpRepository = passwordResetOtpRepository;
+            _emailSender = emailSender;
             _jwtHelper = jwtHelper;
             _configuration = configuration;
             _logger = logger;
@@ -36,7 +39,7 @@ namespace EduHealth.Services.Implementations
                 return null;
             }
 
-            var user = await _userRepository.GetByEmailOrPhoneAsync(request.Identifier, cancellationToken);
+            var user = await _userRepository.GetByUsernameAsync(request.Identifier, cancellationToken);
 
             if (user is null || !user.IsActive || string.Equals(user.Status, "LOCKED", StringComparison.OrdinalIgnoreCase))
             {
@@ -98,19 +101,18 @@ namespace EduHealth.Services.Implementations
             return Task.FromResult(true);
         }
 
-        public async Task RequestOtpAsync(ForgotPasswordRequestDto request, CancellationToken cancellationToken = default)
+        public async Task<bool> RequestOtpAsync(ForgotPasswordRequestDto request, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(request.Email))
             {
-                return;
+                return false;
             }
 
             var user = await _userRepository.GetByEmailAsync(request.Email, cancellationToken);
 
-            // Không lộ việc email có tồn tại hay không
             if (user is null || !user.IsActive)
             {
-                return;
+                return false;
             }
 
             var otpExpireMinutes = int.Parse(_configuration["Auth:OtpExpireMinutes"] ?? "5");
@@ -131,8 +133,26 @@ namespace EduHealth.Services.Implementations
             await _passwordResetOtpRepository.AddAsync(entity, cancellationToken);
             await _passwordResetOtpRepository.SaveChangesAsync(cancellationToken);
 
-            // Dev only: log OTP ra console/log
-            _logger.LogInformation("Password reset OTP for {Email}: {Otp}", user.Email, otp);
+            var subject = "EduHealth - Mã OTP đặt lại mật khẩu";
+            var htmlBody = $@"<div style='font-family: Arial, sans-serif;'>
+<p>Xin chào <b>{System.Net.WebUtility.HtmlEncode(user.FullName)}</b>,</p>
+<p>Mã OTP đặt lại mật khẩu của bạn là:</p>
+<h2 style='letter-spacing: 2px;'>{otp}</h2>
+<p>Mã có hiệu lực trong <b>{otpExpireMinutes}</b> phút.</p>
+<p>Nếu bạn không yêu cầu, vui lòng bỏ qua email này.</p>
+</div>";
+
+            try
+            {
+                await _emailSender.SendAsync(user.Email, subject, htmlBody, cancellationToken);
+                _logger.LogInformation("Password reset OTP email sent to {Email}", user.Email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send password reset OTP email to {Email}", user.Email);
+            }
+
+            return true;
         }
 
         public async Task<VerifyOtpResponseDto?> VerifyOtpAsync(VerifyOtpRequestDto request, CancellationToken cancellationToken = default)

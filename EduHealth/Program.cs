@@ -5,6 +5,9 @@ using EduHealth.Repositories.Implementations;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Implementations;
 using EduHealth.Services.Interfaces;
+using EduHealth.Services;
+using EduHealth.Helpers;
+using EduHealth.Repositories.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -61,6 +64,8 @@ builder.Services.AddScoped<IMedicineService, MedicineService>();
 
 builder.Services.AddScoped<IExaminationRepository, ExaminationRepository>();
 builder.Services.AddScoped<IExaminationService, ExaminationService>();
+
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 
 var app = builder.Build();
 

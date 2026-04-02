@@ -93,9 +93,14 @@ namespace EduHealth.Controllers
                 return BadRequest(ApiResponse<object>.Fail("Email không hợp lệ.", "email"));
             }
 
-            await _authService.RequestOtpAsync(request, cancellationToken);
+            var ok = await _authService.RequestOtpAsync(request, cancellationToken);
 
-            return Ok(ApiResponse<object>.Ok(null, "Nếu email hợp lệ, OTP đã được gửi."));
+            if (!ok)
+            {
+                return BadRequest(ApiResponse<object>.Fail("Email không tồn tại trong hệ thống hoặc tài khoản đã bị khóa.", "email"));
+            }
+
+            return Ok(ApiResponse<object>.Ok(null, "OTP đã được gửi."));
         }
 
         [HttpPost("forgot-password/verify-otp")]
