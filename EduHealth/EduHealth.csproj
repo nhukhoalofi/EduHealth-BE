@@ -39,7 +39,6 @@
     <Folder Include="DTOs\News\" />
     <Folder Include="DTOs\Reports\" />
     <Folder Include="DTOs\Vaccinations\" />
-    <Folder Include="DTOs\Students\" />
     <Folder Include="Extensions\" />
     <Folder Include="Middleware\" />
     <Folder Include="Mapping\" />

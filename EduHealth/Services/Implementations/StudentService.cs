@@ -88,21 +88,29 @@ namespace EduHealth.Services.Implementations
 
             var password = string.IsNullOrWhiteSpace(request.Password) ? "123456Aa@" : request.Password.Trim();
 
+            var now = DateTime.UtcNow;
+
             var user = new User
             {
+                Code = "USR_TMP",
+                Username = $"HS{Guid.NewGuid():N}"[..10].ToUpperInvariant(),
                 FullName = request.FullName.Trim(),
                 Email = email,
                 Phone = phone,
                 Gender = request.Gender?.Trim(),
                 Role = "STUDENT",
                 IsActive = true,
+                Status = "ACTIVE",
                 Avatar = null,
+                CreatedAt = now,
+                UpdatedAt = now,
                 PasswordHash = PasswordHelper.HashPassword(password)
             };
 
             var student = new Student
             {
                 User = user,
+                Code = "STD_TMP",
                 ClassId = request.ClassId,
                 FullName = request.FullName.Trim(),
                 DateOfBirth = request.DateOfBirth.Date,
@@ -114,6 +122,17 @@ namespace EduHealth.Services.Implementations
             };
 
             await _studentRepository.AddAsync(user, student, cancellationToken);
+            await _studentRepository.SaveChangesAsync(cancellationToken);
+
+            // generate stable codes after UserId is available
+            user.Code = $"USR{user.UserId:D3}";
+            user.Username = $"HS{user.UserId:D3}";
+            user.UpdatedAt = DateTime.UtcNow;
+            _studentRepository.UpdateUser(user);
+
+            student.UserId = user.UserId;
+            student.Code = $"STD{user.UserId:D3}";
+            _studentRepository.Update(student);
             await _studentRepository.SaveChangesAsync(cancellationToken);
 
             var saved = await _studentRepository.GetByUserIdAsync(user.UserId, cancellationToken);

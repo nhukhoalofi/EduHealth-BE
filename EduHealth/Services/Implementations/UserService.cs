@@ -80,6 +80,7 @@ namespace EduHealth.Services.Implementations
 
             var user = new User
             {
+                Code = "USR_TMP",
                 Username = username,
                 FullName = request.FullName.Trim(),
                 Email = email,

@@ -1,8 +1,10 @@
 ﻿using EduHealth.DTOs.Common;
 using EduHealth.DTOs.Students;
+using EduHealth.DTOs.Students.HealthProfile;
 using EduHealth.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace EduHealth.Controllers
 {
@@ -12,10 +14,12 @@ namespace EduHealth.Controllers
     public class StudentsController : ControllerBase
     {
         private readonly IStudentService _studentService;
+        private readonly IStudentHealthService _studentHealthService;
 
-        public StudentsController(IStudentService studentService)
+        public StudentsController(IStudentService studentService, IStudentHealthService studentHealthService)
         {
             _studentService = studentService;
+            _studentHealthService = studentHealthService;
         }
 
         [HttpGet]
@@ -103,6 +107,81 @@ namespace EduHealth.Controllers
             var result = await _studentService.ImportStudentsAsync(request, cancellationToken);
 
             return Ok(ApiResponse<StudentImportResultDto>.Ok(result, "Import học sinh hoàn tất."));
+        }
+
+        [HttpGet("{id:int}/health-profile")]
+        [Authorize(Roles = "ADMIN,NURSE")]
+        public async Task<IActionResult> GetHealthProfile([FromRoute] int id, CancellationToken cancellationToken)
+        {
+            var data = await _studentHealthService.GetHealthProfileAsync(id, cancellationToken);
+
+            if (data is null)
+            {
+                return NotFound(ApiResponse<object>.Fail("Không tìm thấy học sinh.", "id"));
+            }
+
+            return Ok(ApiResponse<StudentHealthProfileResponseDto>.Ok(data, "Lấy hồ sơ sức khỏe thành công."));
+        }
+
+        [HttpPatch("{id:int}/health-profile")]
+        [Authorize(Roles = "NURSE")]
+        public async Task<IActionResult> UpdateHealthProfile(
+            [FromRoute] int id,
+            [FromBody] UpdateStudentHealthProfileRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var nurseUserId))
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ."));
+            }
+
+            var (success, message, field, data) = await _studentHealthService.UpdateHealthProfileAsync(
+                nurseUserId,
+                id,
+                request,
+                cancellationToken);
+
+            if (!success)
+            {
+                if (field == "id")
+                {
+                    return NotFound(ApiResponse<object>.Fail(message, field));
+                }
+
+                return BadRequest(ApiResponse<object>.Fail(message, field));
+            }
+
+            return Ok(ApiResponse<StudentHealthProfileResponseDto>.Ok(data, message));
+        }
+
+        [HttpGet("{id:int}/health-history")]
+        [Authorize(Roles = "ADMIN,NURSE")]
+        public async Task<IActionResult> GetHealthHistory(
+            [FromRoute] int id,
+            [FromQuery] StudentHealthHistoryQueryDto query,
+            CancellationToken cancellationToken)
+        {
+            var result = await _studentHealthService.GetHealthHistoryAsync(id, query, cancellationToken);
+            if (result is null)
+            {
+                return NotFound(ApiResponse<object>.Fail("Không tìm thấy học sinh.", "id"));
+            }
+
+            var (items, totalItems, totalPages, page, pageSize) = result.Value;
+            return Ok(new ApiResponse<IReadOnlyList<StudentHealthHistoryItemDto>>
+            {
+                Success = true,
+                Message = "Lấy lịch sử sức khỏe thành công.",
+                Data = items,
+                Meta = new
+                {
+                    page,
+                    pageSize,
+                    totalItems,
+                    totalPages
+                }
+            });
         }
     }
 }
