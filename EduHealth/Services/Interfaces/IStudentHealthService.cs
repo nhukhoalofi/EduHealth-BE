@@ -4,6 +4,7 @@ namespace EduHealth.Services.Interfaces
 {
     public interface IStudentHealthService
     {
+        Task<IReadOnlyList<AllergyTypeLookupItemDto>> GetAllergyTypesAsync(CancellationToken cancellationToken = default);
         Task<StudentHealthProfileResponseDto?> GetHealthProfileAsync(int studentUserId, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, string? Field, StudentHealthProfileResponseDto? Data)> UpdateHealthProfileAsync(
             int nurseUserId,
