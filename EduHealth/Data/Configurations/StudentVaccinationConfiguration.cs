@@ -18,7 +18,23 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.UserId)
                 .IsRequired();
 
+            builder.Property(x => x.CampaignId)
+                .IsRequired();
+
             builder.Property(x => x.Status)
+                .IsRequired();
+
+            builder.Property(x => x.VaccinatedAt)
+                .HasColumnType("date");
+
+            builder.Property(x => x.LotNumber)
+                .HasMaxLength(100);
+
+            builder.Property(x => x.Note)
+                .HasMaxLength(2000);
+
+            builder.Property(x => x.UpdatedAt)
+                .HasColumnType("datetime")
                 .IsRequired();
 
             builder.HasOne(x => x.Student)
@@ -31,7 +47,12 @@ namespace EduHealth.Data.Configurations
                 .HasForeignKey(x => x.VaccinationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            builder.HasIndex(x => new { x.UserId, x.VaccinationId })
+            builder.HasOne(x => x.Campaign)
+                .WithMany(c => c.StudentVaccinations)
+                .HasForeignKey(x => x.CampaignId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            builder.HasIndex(x => new { x.CampaignId, x.UserId })
                 .IsUnique();
         }
     }

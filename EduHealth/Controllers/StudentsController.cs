@@ -1,6 +1,7 @@
 ﻿using EduHealth.DTOs.Common;
 using EduHealth.DTOs.Students;
 using EduHealth.DTOs.Students.HealthProfile;
+using EduHealth.DTOs.Vaccinations;
 using EduHealth.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,11 +16,13 @@ namespace EduHealth.Controllers
     {
         private readonly IStudentService _studentService;
         private readonly IStudentHealthService _studentHealthService;
+        private readonly IVaccinationService _vaccinationService;
 
-        public StudentsController(IStudentService studentService, IStudentHealthService studentHealthService)
+        public StudentsController(IStudentService studentService, IStudentHealthService studentHealthService, IVaccinationService vaccinationService)
         {
             _studentService = studentService;
             _studentHealthService = studentHealthService;
+            _vaccinationService = vaccinationService;
         }
 
         [HttpGet]
@@ -182,6 +185,20 @@ namespace EduHealth.Controllers
                     totalPages
                 }
             });
+        }
+
+        [HttpGet("{id:int}/vaccinations")]
+        [Authorize(Roles = "ADMIN,NURSE")]
+        public async Task<IActionResult> GetVaccinations([FromRoute] int id, CancellationToken cancellationToken)
+        {
+            var data = await _vaccinationService.GetStudentVaccinationHistoryAsync(id, cancellationToken);
+
+            if (data is null)
+            {
+                return NotFound(ApiResponse<object>.Fail("Không tìm thấy học sinh.", "id"));
+            }
+
+            return Ok(ApiResponse<IReadOnlyList<StudentVaccinationHistoryItemDto>>.Ok(data, "Lấy lịch sử tiêm chủng thành công."));
         }
     }
 }

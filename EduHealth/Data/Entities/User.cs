@@ -23,5 +23,7 @@
         public ICollection<HealthVisit> HealthVisitsAsNurse { get; set; } = new List<HealthVisit>();
         public ICollection<MedicineStockLog> MedicineStockLogs { get; set; } = new List<MedicineStockLog>();
         public ICollection<PasswordResetOtp> PasswordResetOtps { get; set; } = new List<PasswordResetOtp>();
+
+        public ICollection<VaccinationCampaign> VaccinationCampaigns { get; set; } = new List<VaccinationCampaign>();
     }
 }

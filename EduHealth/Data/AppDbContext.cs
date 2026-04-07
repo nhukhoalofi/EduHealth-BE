@@ -14,6 +14,8 @@ namespace EduHealth.Data
         public DbSet<AllergyType> AllergyTypes => Set<AllergyType>();
         public DbSet<DiseaseType> DiseaseTypes => Set<DiseaseType>();
         public DbSet<Vaccination> Vaccinations => Set<Vaccination>();
+        public DbSet<VaccinationCampaign> VaccinationCampaigns => Set<VaccinationCampaign>();
+        public DbSet<VaccinationCampaignTargetClass> VaccinationCampaignTargetClasses => Set<VaccinationCampaignTargetClass>();
         public DbSet<Medicine> Medicines => Set<Medicine>();
         public DbSet<Student> Students => Set<Student>();
 

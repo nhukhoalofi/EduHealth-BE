@@ -56,6 +56,7 @@ builder.Services.AddScoped<IPasswordResetOtpRepository, PasswordResetOtpReposito
 builder.Services.AddScoped<IStudentRepository, StudentRepository>();
 builder.Services.AddScoped<IStudentService, StudentService>();
 builder.Services.AddScoped<IStudentHealthService, StudentHealthService>();
+builder.Services.AddScoped<IVaccinationService, VaccinationService>();
 
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
