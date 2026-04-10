@@ -41,7 +41,7 @@ namespace EduHealth.Migrations
                 table: "StudentVaccinations",
                 type: "datetime",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1753, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
 
             migrationBuilder.AddColumn<DateOnly>(
                 name: "VaccinatedAt",
@@ -102,6 +102,43 @@ namespace EduHealth.Migrations
                         principalColumn: "CampaignId",
                         onDelete: ReferentialAction.Cascade);
                 });
+
+            migrationBuilder.Sql(@"
+DECLARE @CreatedByUserId int = (SELECT TOP 1 [UserId] FROM [Users] ORDER BY [UserId]);
+
+INSERT INTO [VaccinationCampaigns]
+    ([Code], [Name], [VaccineName], [DoseNumber], [ScheduledDate], [TargetType], [Status], [Note], [CreatedByUserId], [CreatedAt])
+SELECT
+    CONCAT('VACLEG', RIGHT('000' + CAST(sv.[VaccinationId] AS varchar(3)), 3)) AS [Code],
+    CONCAT('Legacy campaign - ', ISNULL(v.[Name], CONCAT('Vaccine ', sv.[VaccinationId]))) AS [Name],
+    ISNULL(v.[Name], CONCAT('Vaccine ', sv.[VaccinationId])) AS [VaccineName],
+    1 AS [DoseNumber],
+    CAST(GETDATE() AS date) AS [ScheduledDate],
+    'STUDENT' AS [TargetType],
+    'COMPLETED' AS [Status],
+    'Auto-created during migration for legacy student vaccinations.' AS [Note],
+    ISNULL(@CreatedByUserId, 1) AS [CreatedByUserId],
+    GETDATE() AS [CreatedAt]
+FROM (
+    SELECT DISTINCT [VaccinationId]
+    FROM [StudentVaccinations]
+) sv
+LEFT JOIN [Vaccinations] v ON v.[VaccinationId] = sv.[VaccinationId]
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM [VaccinationCampaigns] c
+    WHERE c.[Code] = CONCAT('VACLEG', RIGHT('000' + CAST(sv.[VaccinationId] AS varchar(3)), 3))
+);
+
+UPDATE sv
+SET
+    sv.[CampaignId] = c.[CampaignId],
+    sv.[UpdatedAt] = CASE WHEN sv.[UpdatedAt] IS NULL OR sv.[UpdatedAt] < '1753-01-01' THEN GETDATE() ELSE sv.[UpdatedAt] END
+FROM [StudentVaccinations] sv
+INNER JOIN [VaccinationCampaigns] c
+    ON c.[Code] = CONCAT('VACLEG', RIGHT('000' + CAST(sv.[VaccinationId] AS varchar(3)), 3))
+WHERE sv.[CampaignId] = 0;
+");
 
             migrationBuilder.CreateIndex(
                 name: "IX_StudentVaccinations_CampaignId_UserId",

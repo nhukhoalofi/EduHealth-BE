@@ -25,6 +25,14 @@ namespace EduHealth.Controllers
             _vaccinationService = vaccinationService;
         }
 
+        [HttpGet("allergy-types")]
+        [Authorize(Roles = "ADMIN,NURSE")]
+        public async Task<IActionResult> GetAllergyTypes(CancellationToken cancellationToken)
+        {
+            var data = await _studentHealthService.GetAllergyTypesAsync(cancellationToken);
+            return Ok(ApiResponse<IReadOnlyList<AllergyTypeLookupItemDto>>.Ok(data, "Lấy danh mục dị ứng thành công."));
+        }
+
         [HttpGet]
         [Authorize(Roles = "ADMIN,NURSE")]
         public async Task<IActionResult> GetStudents([FromQuery] StudentListQueryDto query, CancellationToken cancellationToken)
