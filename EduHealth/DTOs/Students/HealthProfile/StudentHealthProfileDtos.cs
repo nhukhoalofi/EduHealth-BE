@@ -52,7 +52,16 @@ namespace EduHealth.DTOs.Students.HealthProfile
 
     public class UpdateStudentAllergyItemDto
     {
-        public int AllergyId { get; set; }
+        public int? AllergyId { get; set; }
+        public string? AllergyTypeId { get; set; }
         public string? Note { get; set; }
+    }
+
+    public class AllergyTypeLookupItemDto
+    {
+        public int AllergyId { get; set; }
+        public string AllergyTypeId { get; set; } = null!;
+        public string AllergyTypeName { get; set; } = null!;
+        public string? Severity { get; set; }
     }
 }
