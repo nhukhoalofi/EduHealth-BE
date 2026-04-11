@@ -35,6 +35,36 @@ namespace EduHealth.Data.Seeders
             // This targets only records created by this seeder range (CLS101-103, USR/HS >= 101).
             const int userStart = 100;
 
+            // 1. Clean up bulk users and all dependencies
+            var bulkUsers = await context.Users
+                .Where(u => u.Username.StartsWith("HS") && u.Code.StartsWith("USR") && u.UserId >= userStart)
+                .ToListAsync();
+
+            var bulkUserIds = bulkUsers.Select(u => u.UserId).ToList();
+
+            if (bulkUserIds.Count > 0)
+            {
+                var visits = await context.HealthVisits
+                    .Where(v => bulkUserIds.Contains(v.StudentUserId))
+                    .Select(v => v.VisitId)
+                    .ToListAsync();
+
+                if (visits.Count > 0)
+                {
+                    context.VisitPrescriptions.RemoveRange(context.VisitPrescriptions.Where(x => visits.Contains(x.VisitId)));
+                    context.MedicineStockLogs.RemoveRange(context.MedicineStockLogs.Where(x => x.VisitId.HasValue && visits.Contains(x.VisitId.Value)));
+                    context.HealthVisits.RemoveRange(context.HealthVisits.Where(x => visits.Contains(x.VisitId)));
+                }
+
+                // Remove targeted student dependencies, then the students, then the users themselves
+                context.StudentVaccinations.RemoveRange(context.StudentVaccinations.Where(x => bulkUserIds.Contains(x.UserId)));
+                context.StudentAllergies.RemoveRange(context.StudentAllergies.Where(x => bulkUserIds.Contains(x.UserId)));
+                context.Students.RemoveRange(context.Students.Where(x => bulkUserIds.Contains(x.UserId)));
+                
+                context.Users.RemoveRange(bulkUsers);
+            }
+
+            // 2. Remove bulk classes
             var classIds = await context.SchoolClasses
                 .Where(x => x.Code == "CLS101" || x.Code == "CLS102" || x.Code == "CLS103")
                 .Select(x => x.ClassId)
@@ -42,38 +72,10 @@ namespace EduHealth.Data.Seeders
 
             if (classIds.Count > 0)
             {
-                var studentUserIds = await context.Students
-                    .Where(s => classIds.Contains(s.ClassId))
-                    .Select(s => s.UserId)
-                    .ToListAsync();
-
-                if (studentUserIds.Count > 0)
-                {
-                    var visits = await context.HealthVisits
-                        .Where(v => studentUserIds.Contains(v.StudentUserId) && v.Code.StartsWith("VIS"))
-                        .Select(v => v.VisitId)
-                        .ToListAsync();
-
-                    if (visits.Count > 0)
-                    {
-                        context.VisitPrescriptions.RemoveRange(context.VisitPrescriptions.Where(x => visits.Contains(x.VisitId)));
-                        context.MedicineStockLogs.RemoveRange(context.MedicineStockLogs.Where(x => x.VisitId.HasValue && visits.Contains(x.VisitId.Value)));
-                        context.HealthVisits.RemoveRange(context.HealthVisits.Where(x => visits.Contains(x.VisitId)));
-                    }
-
-                    // StudentVaccinations: only those created for seeded students (keep other students intact)
-                    context.StudentVaccinations.RemoveRange(context.StudentVaccinations.Where(x => studentUserIds.Contains(x.UserId)));
-                    context.StudentAllergies.RemoveRange(context.StudentAllergies.Where(x => studentUserIds.Contains(x.UserId)));
-                    context.Students.RemoveRange(context.Students.Where(x => studentUserIds.Contains(x.UserId)));
-
-                    // Remove the corresponding Users by code/username range
-                    context.Users.RemoveRange(context.Users.Where(u => u.Username.StartsWith("HS") && u.Code.StartsWith("USR") && u.UserId >= userStart));
-                }
-
                 context.SchoolClasses.RemoveRange(context.SchoolClasses.Where(x => classIds.Contains(x.ClassId)));
             }
 
-            // Remove bulk medicines MED101..MED130
+            // 3. Remove bulk medicines MED101..MED130
             context.Medicines.RemoveRange(context.Medicines.Where(x => x.Code.CompareTo("MED101") >= 0 && x.Code.CompareTo("MED130") <= 0));
 
             await context.SaveChangesAsync();
@@ -286,10 +288,12 @@ namespace EduHealth.Data.Seeders
             }
 
             // Seed health visits for bulk students (1 visit/student) for testing.
-            var nurse = await context.Users.AsNoTracking().FirstAsync(x => x.Role == "NURSE");
+            var nurse = await context.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Role == "NURSE");
             var diseases = await context.DiseaseTypes.AsNoTracking().OrderBy(x => x.DiseaseId).ToListAsync();
-            var med1 = await context.Medicines.AsNoTracking().OrderBy(x => x.MedicineId).FirstAsync();
-            var med2 = await context.Medicines.AsNoTracking().OrderByDescending(x => x.MedicineId).FirstAsync();
+            var med1 = await context.Medicines.AsNoTracking().OrderBy(x => x.MedicineId).FirstOrDefaultAsync();
+            var med2 = await context.Medicines.AsNoTracking().OrderByDescending(x => x.MedicineId).FirstOrDefaultAsync();
+
+            if (nurse == null || !diseases.Any() || med1 == null || med2 == null) return;
 
             var bulkStudentIds = await context.Students
                 .AsNoTracking()
@@ -378,9 +382,11 @@ namespace EduHealth.Data.Seeders
         {
             if (await context.VaccinationCampaigns.AnyAsync()) return;
 
-            var admin = await context.Users.FirstAsync(x => x.Role == "ADMIN");
-            var vac = await context.Vaccinations.FirstAsync();
+            var admin = await context.Users.FirstOrDefaultAsync(x => x.Role == "ADMIN");
+            var vac = await context.Vaccinations.FirstOrDefaultAsync();
             var classes = await context.SchoolClasses.OrderBy(x => x.ClassId).Take(2).ToListAsync();
+
+            if (admin == null || vac == null || !classes.Any()) return;
 
             var camp = new VaccinationCampaign
             {
@@ -704,12 +710,14 @@ namespace EduHealth.Data.Seeders
         {
             if (await context.Students.AnyAsync()) return;
 
-            var cls1 = await context.SchoolClasses.FirstAsync(x => x.Code == "CLS001");
-            var cls2 = await context.SchoolClasses.FirstAsync(x => x.Code == "CLS002");
+            var cls1 = await context.SchoolClasses.FirstOrDefaultAsync(x => x.Code == "CLS001");
+            var cls2 = await context.SchoolClasses.FirstOrDefaultAsync(x => x.Code == "CLS002");
 
-            var u1 = await context.Users.FirstAsync(x => x.Code == "USR003");
-            var u2 = await context.Users.FirstAsync(x => x.Code == "USR005");
-            var u3 = await context.Users.FirstAsync(x => x.Code == "USR006");
+            var u1 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR003");
+            var u2 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR005");
+            var u3 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR006");
+
+            if (cls1 == null || cls2 == null || u1 == null || u2 == null || u3 == null) return;
 
             var s1 = new Student
             {
@@ -753,34 +761,42 @@ namespace EduHealth.Data.Seeders
             context.Students.AddRange(s1, s2, s3);
             await context.SaveChangesAsync();
 
-            var allergy1 = await context.AllergyTypes.FirstAsync();
-            var allergy2 = await context.AllergyTypes.Skip(1).FirstAsync();
+            var allergy1 = await context.AllergyTypes.FirstOrDefaultAsync();
+            var allergy2 = await context.AllergyTypes.Skip(1).FirstOrDefaultAsync();
 
-            context.StudentAllergies.AddRange(
-                new StudentAllergy { UserId = s1.UserId, AllergyId = allergy1.AllergyId, Note = "Nổi mề đay" },
-                new StudentAllergy { UserId = s2.UserId, AllergyId = allergy2.AllergyId, Note = "Mẩn đỏ" }
-            );
+            if (allergy1 != null && allergy2 != null)
+            {
+                context.StudentAllergies.AddRange(
+                    new StudentAllergy { UserId = s1.UserId, AllergyId = allergy1.AllergyId, Note = "Nổi mề đay" },
+                    new StudentAllergy { UserId = s2.UserId, AllergyId = allergy2.AllergyId, Note = "Mẩn đỏ" }
+                );
+            }
 
-            var vac1 = await context.Vaccinations.FirstAsync();
-            var vac2 = await context.Vaccinations.Skip(1).FirstAsync();
+            var vac1 = await context.Vaccinations.FirstOrDefaultAsync();
+            var vac2 = await context.Vaccinations.Skip(1).FirstOrDefaultAsync();
 
-            context.StudentVaccinations.AddRange(
-                new StudentVaccination { UserId = s1.UserId, VaccinationId = vac1.VaccinationId, Status = "DONE" },
-                new StudentVaccination { UserId = s1.UserId, VaccinationId = vac2.VaccinationId, Status = "DONE" }
-            );
+            if (vac1 != null && vac2 != null)
+            {
+                context.StudentVaccinations.AddRange(
+                    new StudentVaccination { UserId = s1.UserId, VaccinationId = vac1.VaccinationId, Status = "DONE" },
+                    new StudentVaccination { UserId = s1.UserId, VaccinationId = vac2.VaccinationId, Status = "DONE" }
+                );
+            }
 
             await context.SaveChangesAsync();
-        }
+        }   
 
         private static async Task SeedHealthVisitsAsync(AppDbContext context)
         {
             if (await context.HealthVisits.AnyAsync()) return;
 
-            var nurse = await context.Users.FirstAsync(x => x.Role == "NURSE");
-            var student = await context.Students.FirstAsync();
-            var dis = await context.DiseaseTypes.FirstAsync();
-            var med1 = await context.Medicines.FirstAsync(x => x.Code == "MED001");
-            var med2 = await context.Medicines.FirstAsync(x => x.Code == "MED002");
+            var nurse = await context.Users.FirstOrDefaultAsync(x => x.Role == "NURSE");
+            var student = await context.Students.FirstOrDefaultAsync();
+            var dis = await context.DiseaseTypes.FirstOrDefaultAsync();
+            var med1 = await context.Medicines.FirstOrDefaultAsync(x => x.Code == "MED001");
+            var med2 = await context.Medicines.FirstOrDefaultAsync(x => x.Code == "MED002");
+
+            if (nurse == null || student == null || dis == null || med1 == null || med2 == null) return;
 
             var visit = new HealthVisit
             {
@@ -840,9 +856,11 @@ namespace EduHealth.Data.Seeders
         {
             if (await context.Notifications.AnyAsync()) return;
 
-            var admin = await context.Users.FirstAsync(x => x.Role == "ADMIN");
-            var nurse = await context.Users.FirstAsync(x => x.Role == "NURSE");
-            var studentUser = await context.Users.FirstAsync(x => x.Role == "STUDENT");
+            var admin = await context.Users.FirstOrDefaultAsync(x => x.Role == "ADMIN");
+            var nurse = await context.Users.FirstOrDefaultAsync(x => x.Role == "NURSE");
+            var studentUser = await context.Users.FirstOrDefaultAsync(x => x.Role == "STUDENT");
+
+            if (admin == null || nurse == null || studentUser == null) return;
 
             var noti = new Notification
             {

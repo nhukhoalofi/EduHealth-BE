@@ -93,7 +93,7 @@ namespace EduHealth.Migrations
                 table: "Medicines",
                 type: "datetime",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) );
 
             migrationBuilder.AddColumn<string>(
                 name: "Note",
@@ -122,7 +122,7 @@ namespace EduHealth.Migrations
                 table: "Medicines",
                 type: "datetime",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) );
 
             migrationBuilder.AddColumn<int>(
                 name: "WarningThreshold",
@@ -235,7 +235,7 @@ namespace EduHealth.Migrations
                 table: "Medicines",
                 type: "date",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) );
 
             migrationBuilder.AddColumn<int>(
                 name: "MinStockLevel",

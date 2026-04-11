@@ -24,7 +24,7 @@ namespace EduHealth.Migrations
                 table: "Users",
                 type: "datetime",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) );
 
             migrationBuilder.AddColumn<DateTime>(
                 name: "LastLoginAt",
@@ -52,7 +52,7 @@ namespace EduHealth.Migrations
                 table: "Users",
                 type: "datetime",
                 nullable: false,
-                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
+                defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified) );
 
             migrationBuilder.AddColumn<string>(
                 name: "Username",

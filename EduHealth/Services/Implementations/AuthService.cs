@@ -369,5 +369,41 @@ namespace EduHealth.Services.Implementations
                 Message = "Đổi mật khẩu thành công."
             };
         }
+
+        public async Task<(bool Success, string Message, string Field, MeResponseDto? Data)> UpdateProfileAsync(int userId, UpdateProfileRequestDto request, CancellationToken cancellationToken = default)
+        {
+            var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
+            if (user is null)
+            {
+                return (false, "Không tìm thấy người dùng.", string.Empty, null);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.FullName))
+            {
+                user.FullName = request.FullName.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Phone))
+            {
+                user.Phone = request.Phone.Trim();
+            }
+
+            user.UpdatedAt = DateTime.UtcNow;
+            _userRepository.Update(user);
+            await _userRepository.SaveChangesAsync(cancellationToken);
+
+            var response = new MeResponseDto
+            {
+                UserId = user.UserId,
+                FullName = user.FullName,
+                Email = user.Email,
+                Phone = user.Phone,
+                Role = user.Role,
+                IsActive = user.IsActive,
+                Avatar = user.Avatar
+            };
+
+            return (true, "Cập nhật hồ sơ cá nhân thành công.", string.Empty, response);
+        }
     }
 }
