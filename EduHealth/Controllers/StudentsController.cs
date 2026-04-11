@@ -96,6 +96,29 @@ namespace EduHealth.Controllers
             return Ok(ApiResponse<object>.Ok(null, result.Message));
         }
 
+        [HttpPatch("{id:int}/image")]
+        [Authorize(Roles = "ADMIN")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UpdateStudentImage(
+            [FromRoute] int id,
+            [FromForm] StudentImageUpdateRequestDto request,
+            CancellationToken cancellationToken)
+        {
+            var result = await _studentService.UpdateStudentImageAsync(id, request.File, cancellationToken);
+
+            if (!result.Success)
+            {
+                if (result.Field == "id")
+                {
+                    return NotFound(ApiResponse<object>.Fail(result.Message, result.Field));
+                }
+
+                return BadRequest(ApiResponse<object>.Fail(result.Message, result.Field));
+            }
+
+            return Ok(ApiResponse<object>.Ok(new { imageUrl = result.ImageUrl }, result.Message));
+        }
+
         [HttpDelete("{id:int}")]
         [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> DeleteStudent([FromRoute] int id, CancellationToken cancellationToken)

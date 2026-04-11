@@ -12,5 +12,6 @@ namespace EduHealth.Services.Interfaces
         Task<StudentOperationResultDto> DeleteStudentAsync(int userId, CancellationToken cancellationToken = default);
 
         Task<StudentImportResultDto> ImportStudentsAsync(StudentImportRequestDto request, CancellationToken cancellationToken = default);
+        Task<(bool Success, string Message, string? Field, string? ImageUrl)> UpdateStudentImageAsync(int studentUserId, IFormFile file, CancellationToken cancellationToken = default);
     }
 }

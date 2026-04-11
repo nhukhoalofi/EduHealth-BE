@@ -4,6 +4,8 @@ using EduHealth.DTOs.Students;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using System.Globalization;
 
 namespace EduHealth.Services.Implementations
@@ -11,10 +13,58 @@ namespace EduHealth.Services.Implementations
     public class StudentService : IStudentService
     {
         private readonly IStudentRepository _studentRepository;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly IConfiguration _configuration;
 
-        public StudentService(IStudentRepository studentRepository)
+        public StudentService(IStudentRepository studentRepository, ICloudinaryService cloudinaryService, IConfiguration configuration)
         {
             _studentRepository = studentRepository;
+            _cloudinaryService = cloudinaryService;
+            _configuration = configuration;
+        }
+
+        public async Task<(bool Success, string Message, string? Field, string? ImageUrl)> UpdateStudentImageAsync(
+            int studentUserId,
+            IFormFile file,
+            CancellationToken cancellationToken = default)
+        {
+            if (file is null || file.Length == 0)
+            {
+                return (false, "Vui lòng chọn file hình ảnh.", "file", null);
+            }
+
+            // basic validation (avoid non-image uploads)
+            if (string.IsNullOrWhiteSpace(file.ContentType) || !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return (false, "File không đúng định dạng hình ảnh.", "file", null);
+            }
+
+            var student = await _studentRepository.GetByUserIdAsync(studentUserId, cancellationToken);
+            if (student is null)
+            {
+                return (false, "Không tìm thấy học sinh.", "id", null);
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot)
+                ? "eduhealth/students"
+                : $"{folderRoot.Trim().TrimEnd('/')}/students";
+
+            try
+            {
+                var (url, publicId) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
+
+                student.User.Avatar = url;
+                student.User.UpdatedAt = DateTime.UtcNow;
+                _studentRepository.UpdateUser(student.User);
+                await _studentRepository.SaveChangesAsync(cancellationToken);
+
+                return (true, "Cập nhật hình ảnh học sinh thành công.", null, url);
+            }
+            catch
+            {
+                return (false, "Upload hình ảnh thất bại.", "file", null);
+            }
         }
 
         public async Task<StudentListResultDto> GetStudentsAsync(StudentListQueryDto query, CancellationToken cancellationToken = default)
@@ -387,6 +437,7 @@ namespace EduHealth.Services.Implementations
             return new StudentListItemDto
             {
                 UserId = student.UserId,
+                ImageUrl = student.User.Avatar,
                 FullName = student.FullName,
                 DateOfBirth = student.DateOfBirth,
                 ClassId = student.ClassId,
@@ -405,6 +456,7 @@ namespace EduHealth.Services.Implementations
             return new StudentDetailDto
             {
                 UserId = student.UserId,
+                ImageUrl = student.User.Avatar,
                 ClassId = student.ClassId,
                 ClassName = student.Class.ClassName,
                 FullName = student.FullName,

@@ -3,6 +3,7 @@ namespace EduHealth.DTOs.Students
     public class StudentDetailDto
     {
         public int UserId { get; set; }
+        public string? ImageUrl { get; set; }
         public int ClassId { get; set; }
         public string ClassName { get; set; } = null!;
         public string FullName { get; set; } = null!;

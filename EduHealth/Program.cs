@@ -8,6 +8,7 @@ using EduHealth.Services.Interfaces;
 using EduHealth.Services;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
+using CloudinaryDotNet;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -45,6 +46,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+
+// Cloudinary
+builder.Services.AddSingleton(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var cloudName = config["Cloudinary:CloudName"];
+    var apiKey = config["Cloudinary:ApiKey"];
+    var apiSecret = config["Cloudinary:ApiSecret"];
+
+    if (string.IsNullOrWhiteSpace(cloudName) || string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(apiSecret))
+    {
+        throw new InvalidOperationException("Cloudinary configuration is missing. Please set Cloudinary:CloudName, Cloudinary:ApiKey, Cloudinary:ApiSecret.");
+    }
+
+    return new Cloudinary(new Account(cloudName, apiKey, apiSecret));
+});
+builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
 
 // DI
 builder.Services.AddScoped<IUserRepository, UserRepository>();
