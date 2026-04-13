@@ -1,6 +1,7 @@
 .vs/
 bin/
 obj/
+.github/
 PBL3_EduHealth-FE/
 
 *.user
