@@ -1,8 +1,10 @@
 .vs/
 bin/
 obj/
+PBL3_EduHealth-FE/
 
 *.user
 *.suo
 *.userosscache
 *.sln.docstates
+

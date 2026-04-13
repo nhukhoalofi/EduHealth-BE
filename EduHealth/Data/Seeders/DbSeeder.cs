@@ -783,6 +783,9 @@ namespace EduHealth.Data.Seeders
                 );
             }
 
+            // Việc seed StudentVaccinations đã được chuyển sang đảm nhiệm tại SeedVaccinationCampaignsAsync 
+            // để đảm bảo tính nhất quán với CampaignId và UpdatedAt.
+            
             await context.SaveChangesAsync();
         }   
 

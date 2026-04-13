@@ -15,6 +15,7 @@ namespace EduHealth.Services.Implementations
         private readonly JwtHelper _jwtHelper;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthService> _logger;
+        private readonly ICloudinaryService _cloudinaryService;
 
         public AuthService(
             IUserRepository userRepository,
@@ -22,7 +23,8 @@ namespace EduHealth.Services.Implementations
             IEmailSender emailSender,
             JwtHelper jwtHelper,
             IConfiguration configuration,
-            ILogger<AuthService> logger)
+            ILogger<AuthService> logger,
+            ICloudinaryService cloudinaryService)
         {
             _userRepository = userRepository;
             _passwordResetOtpRepository = passwordResetOtpRepository;
@@ -30,6 +32,7 @@ namespace EduHealth.Services.Implementations
             _jwtHelper = jwtHelper;
             _configuration = configuration;
             _logger = logger;
+            _cloudinaryService = cloudinaryService;
         }
 
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
@@ -73,6 +76,7 @@ namespace EduHealth.Services.Implementations
             };
         }
 
+        // Ghi đè/cập nhật hàm GetMeAsync
         public async Task<MeResponseDto?> GetMeAsync(int userId, CancellationToken cancellationToken = default)
         {
             var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
@@ -85,11 +89,13 @@ namespace EduHealth.Services.Implementations
             return new MeResponseDto
             {
                 UserId = user.UserId,
+                Username = user.Username,
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
                 Role = user.Role,
                 IsActive = user.IsActive,
+                Status = user.Status,
                 Avatar = user.Avatar
             };
         }
@@ -395,15 +401,58 @@ namespace EduHealth.Services.Implementations
             var response = new MeResponseDto
             {
                 UserId = user.UserId,
+                Username = user.Username,
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
                 Role = user.Role,
                 IsActive = user.IsActive,
+                Status = user.Status,
                 Avatar = user.Avatar
             };
 
             return (true, "Cập nhật hồ sơ cá nhân thành công.", string.Empty, response);
+        }
+
+        public async Task<(bool Success, string Message, string Field, string? AvatarUrl)> UpdateAvatarAsync(int userId, IFormFile file, CancellationToken cancellationToken = default)
+        {
+            if (file is null || file.Length == 0)
+            {
+                return (false, "Vui lòng chọn file hình ảnh.", "file", null);
+            }
+
+            if (string.IsNullOrWhiteSpace(file.ContentType) || !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return (false, "File không đúng định dạng hình ảnh.", "file", null);
+            }
+
+            var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
+            if (user is null)
+            {
+                return (false, "Không tìm thấy người dùng.", "id", null);
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot)
+                ? "eduhealth/users"
+                : $"{folderRoot.Trim().TrimEnd('/')}/users";
+
+            try
+            {
+                var (url, publicId) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
+
+                user.Avatar = url;
+                user.UpdatedAt = DateTime.UtcNow;
+                _userRepository.Update(user);
+                await _userRepository.SaveChangesAsync(cancellationToken);
+
+                return (true, "Cập nhật ảnh đại diện thành công.", string.Empty, url);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Upload avatar chi tiết lỗi cho userId {UserId}", userId);
+                return (false, "Upload hình ảnh thất bại.", "file", null);
+            }
         }
     }
 }
