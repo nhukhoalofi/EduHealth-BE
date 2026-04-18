@@ -144,7 +144,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/health-profile")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetHealthProfile([FromRoute] int id, CancellationToken cancellationToken)
         {
             var data = await _studentHealthService.GetHealthProfileAsync(id, cancellationToken);
@@ -190,7 +190,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/health-history")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetHealthHistory(
             [FromRoute] int id,
             [FromQuery] StudentHealthHistoryQueryDto query,
@@ -219,7 +219,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/vaccinations")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetVaccinations([FromRoute] int id, CancellationToken cancellationToken)
         {
             var data = await _vaccinationService.GetStudentVaccinationHistoryAsync(id, cancellationToken);

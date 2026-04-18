@@ -53,7 +53,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("me")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> Me(CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -147,7 +147,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPost("change-password")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> ChangePassword(
             [FromBody] ChangePasswordRequestDto request,
             CancellationToken cancellationToken)
@@ -170,7 +170,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPatch("me")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> UpdateMe([FromBody] UpdateProfileRequestDto request, CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -191,7 +191,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPatch("me/avatar")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> UpdateMyAvatar([FromForm] UpdateAvatarRequestDto request, CancellationToken cancellationToken)
         {

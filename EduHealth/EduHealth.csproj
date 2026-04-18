@@ -39,6 +39,7 @@
     <Folder Include="DTOs\Alerts\" />
     <Folder Include="DTOs\News\" />
     <Folder Include="DTOs\Reports\" />
+    <Folder Include="DTOs\StudentPortal\" />
     <Folder Include="Extensions\" />
     <Folder Include="Middleware\" />
     <Folder Include="Mapping\" />

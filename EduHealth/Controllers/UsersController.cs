@@ -19,6 +19,36 @@ namespace EduHealth.Controllers
             _userService = userService;
         }
 
+        [HttpPatch("{id}/image")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UpdateImage([FromRoute] string id, [FromForm] EduHealth.DTOs.Auth.UpdateAvatarRequestDto request, CancellationToken cancellationToken)
+        {
+            var (success, message, errors, data) = await _userService.UpdateAvatarByCodeAsync(id, request.File, cancellationToken);
+
+            if (!success)
+            {
+                return BadRequest(new ApiErrorResponseV2
+                {
+                    Success = false,
+                    Message = message,
+                    Errors = errors.Select(x => new ApiErrorItemDto { Field = x.Field, Code = x.Code, Message = x.Message }).ToList(),
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+
+            return Ok(new ApiResponseV2<object>
+            {
+                Success = true,
+                Message = message,
+                Data = data,
+                Meta = null,
+                Timestamp = DateTime.UtcNow,
+                TraceId = HttpContext.TraceIdentifier
+            });
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetUsers([FromQuery] UserListQueryDto query, CancellationToken cancellationToken)
         {

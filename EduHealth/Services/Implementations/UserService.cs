@@ -5,6 +5,8 @@ using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 
 namespace EduHealth.Services.Implementations
 {
@@ -12,11 +14,15 @@ namespace EduHealth.Services.Implementations
     {
         private readonly IUserRepository _userRepository;
         private readonly ISystemLogWriter _logWriter;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly IConfiguration _configuration;
 
-        public UserService(IUserRepository userRepository, ISystemLogWriter logWriter)
+        public UserService(IUserRepository userRepository, ISystemLogWriter logWriter, ICloudinaryService cloudinaryService, IConfiguration configuration)
         {
             _userRepository = userRepository;
             _logWriter = logWriter;
+            _cloudinaryService = cloudinaryService;
+            _configuration = configuration;
         }
 
         public async Task<(IReadOnlyList<UserListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -311,6 +317,70 @@ namespace EduHealth.Services.Implementations
                 TemporaryPassword = temp,
                 UpdatedAt = user.UpdatedAt
             });
+        }
+
+        public async Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateAvatarByCodeAsync(
+            string code,
+            IFormFile file,
+            CancellationToken cancellationToken = default)
+        {
+            var errors = new List<(string Field, string Code, string Message)>();
+
+            if (file is null || file.Length == 0)
+            {
+                errors.Add(("file", "REQUIRED", "Vui lòng chọn file hình ảnh."));
+                return (false, "Dữ liệu không hợp lệ.", errors, null);
+            }
+
+            if (string.IsNullOrWhiteSpace(file.ContentType) || !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(("file", "INVALID_FILE", "File không đúng định dạng hình ảnh."));
+                return (false, "Dữ liệu không hợp lệ.", errors, null);
+            }
+
+            var user = await _userRepository.GetByCodeAsync(code, cancellationToken);
+            if (user is null)
+            {
+                errors.Add(("id", "USER_NOT_FOUND", "Không tồn tại user với id đã cung cấp."));
+                return (false, "Không tìm thấy tài khoản.", errors, null);
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot)
+                ? "eduhealth/users"
+                : $"{folderRoot.Trim().TrimEnd('/')}/users";
+
+            try
+            {
+                var (url, _) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
+
+                user.Avatar = url;
+                user.UpdatedAt = DateTime.UtcNow;
+                _userRepository.Update(user);
+                await _userRepository.SaveChangesAsync(cancellationToken);
+
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = null,
+                    ActorName = "Hệ thống",
+                    ActorRole = "SYSTEM",
+                    Module = "USERS",
+                    Action = "UPDATE_USER_AVATAR",
+                    TargetType = "User",
+                    TargetId = user.Code,
+                    TargetLabel = user.FullName,
+                    Description = $"Cập nhật ảnh đại diện cho tài khoản {user.Username}",
+                    Status = "SUCCESS",
+                    Metadata = new { avatarUrl = url }
+                }, cancellationToken);
+
+                return (true, "Cập nhật ảnh đại diện thành công.", Array.Empty<(string, string, string)>(), new { avatarUrl = url });
+            }
+            catch
+            {
+                errors.Add(("file", "UPLOAD_FAILED", "Upload hình ảnh thất bại."));
+                return (false, "Upload hình ảnh thất bại.", errors, null);
+            }
         }
 
         private static UserListItemDto MapListItem(User x) => new()

@@ -10,5 +10,6 @@ namespace EduHealth.Services.Interfaces
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, UserDetailDto? Data)> UpdateAsync(string code, UpdateUserRequestDto request, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateStatusAsync(string code, UpdateUserStatusRequestDto request, int currentUserId, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, ResetPasswordResponseDto? Data)> ResetPasswordAsync(string code, ResetPasswordRequestDto request, CancellationToken cancellationToken = default);
+        Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateAvatarByCodeAsync(string code, Microsoft.AspNetCore.Http.IFormFile file, CancellationToken cancellationToken = default);
     }
 }
