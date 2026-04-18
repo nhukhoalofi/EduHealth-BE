@@ -13,10 +13,12 @@ namespace EduHealth.Services.Implementations
         };
 
         private readonly IMedicineRepository _medicineRepository;
+        private readonly ISystemLogWriter _logWriter;
 
-        public MedicineService(IMedicineRepository medicineRepository)
+        public MedicineService(IMedicineRepository medicineRepository, ISystemLogWriter logWriter)
         {
             _medicineRepository = medicineRepository;
+            _logWriter = logWriter;
         }
 
         public async Task<(IReadOnlyList<MedicineListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -312,6 +314,27 @@ namespace EduHealth.Services.Implementations
             await _medicineRepository.AddMovementAsync(log, cancellationToken);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = performedByUserId,
+                Module = "MEDICINES",
+                Action = "STOCK_IN",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Nhập kho thuốc {medicine.Name}",
+                Status = "SUCCESS",
+                Metadata = new
+                {
+                    quantity = request.Quantity,
+                    stockBefore,
+                    stockAfter = medicine.StockQuantity,
+                    expiryDate = request.ExpiryDate,
+                    batchNumber = request.BatchNumber,
+                    note = request.Note
+                }
+            }, cancellationToken);
+
             return (true, "Nhập kho thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {
                 MedicineId = medicine.Code,
@@ -377,6 +400,28 @@ namespace EduHealth.Services.Implementations
             _medicineRepository.Update(medicine);
             await _medicineRepository.AddMovementAsync(log, cancellationToken);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = performedByUserId,
+                Module = "MEDICINES",
+                Action = "DISPOSE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Hủy thuốc {medicine.Name}",
+                Status = "SUCCESS",
+                Metadata = new
+                {
+                    quantity = request.Quantity,
+                    stockBefore,
+                    stockAfter = medicine.StockQuantity,
+                    reason = request.Reason,
+                    expiryDate = request.ExpiryDate,
+                    batchNumber = request.BatchNumber,
+                    note = request.Note
+                }
+            }, cancellationToken);
 
             return (true, "Hủy thuốc thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {

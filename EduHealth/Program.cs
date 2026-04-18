@@ -85,6 +85,12 @@ builder.Services.AddScoped<IMedicineService, MedicineService>();
 builder.Services.AddScoped<IExaminationRepository, ExaminationRepository>();
 builder.Services.AddScoped<IExaminationService, ExaminationService>();
 
+builder.Services.AddScoped<ICatalogService, CatalogService>();
+
+builder.Services.AddScoped<ISystemLogRepository, SystemLogRepository>();
+builder.Services.AddScoped<ISystemLogWriter, SystemLogWriter>();
+builder.Services.AddScoped<ISystemLogService, SystemLogService>();
+
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 

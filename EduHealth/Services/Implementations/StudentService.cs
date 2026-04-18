@@ -15,12 +15,14 @@ namespace EduHealth.Services.Implementations
         private readonly IStudentRepository _studentRepository;
         private readonly ICloudinaryService _cloudinaryService;
         private readonly IConfiguration _configuration;
+        private readonly ISystemLogWriter _logWriter;
 
-        public StudentService(IStudentRepository studentRepository, ICloudinaryService cloudinaryService, IConfiguration configuration)
+        public StudentService(IStudentRepository studentRepository, ICloudinaryService cloudinaryService, IConfiguration configuration, ISystemLogWriter logWriter)
         {
             _studentRepository = studentRepository;
             _cloudinaryService = cloudinaryService;
             _configuration = configuration;
+            _logWriter = logWriter;
         }
 
         public async Task<(bool Success, string Message, string? Field, string? ImageUrl)> UpdateStudentImageAsync(
@@ -186,6 +188,21 @@ namespace EduHealth.Services.Implementations
             await _studentRepository.SaveChangesAsync(cancellationToken);
 
             var saved = await _studentRepository.GetByUserIdAsync(user.UserId, cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                ActorName = "Hệ thống",
+                ActorRole = "SYSTEM",
+                Module = "STUDENTS",
+                Action = "CREATE_USER",
+                TargetType = "Student",
+                TargetId = user.Code,
+                TargetLabel = saved!.FullName,
+                Description = "Tạo tài khoản học sinh mới",
+                Status = "SUCCESS",
+                Metadata = new { studentId = saved!.Code, userId = user.Code, status = user.Status }
+            }, cancellationToken);
 
             return new StudentCreateResultDto
             {

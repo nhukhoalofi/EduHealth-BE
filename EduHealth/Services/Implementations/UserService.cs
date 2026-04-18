@@ -3,6 +3,7 @@ using EduHealth.DTOs.Users;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace EduHealth.Services.Implementations
@@ -10,10 +11,12 @@ namespace EduHealth.Services.Implementations
     public class UserService : IUserService
     {
         private readonly IUserRepository _userRepository;
+        private readonly ISystemLogWriter _logWriter;
 
-        public UserService(IUserRepository userRepository)
+        public UserService(IUserRepository userRepository, ISystemLogWriter logWriter)
         {
             _userRepository = userRepository;
+            _logWriter = logWriter;
         }
 
         public async Task<(IReadOnlyList<UserListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -221,6 +224,25 @@ namespace EduHealth.Services.Implementations
 
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            var actor = await _userRepository.GetByIdAsync(currentUserId, cancellationToken);
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = currentUserId,
+                ActorName = actor?.FullName,
+                ActorUsername = actor?.Username,
+                ActorRole = actor?.Role,
+                Module = "USERS",
+                Action = status == "LOCKED" ? "LOCK_USER" : "UNLOCK_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = status == "LOCKED"
+                    ? $"Khóa tài khoản {user.Username}" 
+                    : $"Mở khóa tài khoản {user.Username}",
+                Status = "SUCCESS",
+                Metadata = new { status = user.Status, reason = user.LockReason }
+            }, cancellationToken);
 
             return (true, "Cập nhật trạng thái tài khoản thành công.", Array.Empty<(string, string, string)>(), new
             {
