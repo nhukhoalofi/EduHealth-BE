@@ -118,7 +118,9 @@ namespace EduHealth.Controllers
         [Authorize(Roles = "NURSE")]
         public async Task<IActionResult> GetNurseDashboard(CancellationToken cancellationToken)
         {
-            var data = await _reportService.GetNurseDashboardAsync(0, cancellationToken); // Truyền stub NurseId
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _ = int.TryParse(userIdClaim, out var nurseId);
+            var data = await _reportService.GetNurseDashboardAsync(nurseId, cancellationToken);
             return Ok(new ApiResponseV2<NurseReportDashboardDto> { Success = true, Message = "Lấy dữ liệu dashboard Y tá thành công", Data = data, Timestamp = DateTime.UtcNow });
         }
 
