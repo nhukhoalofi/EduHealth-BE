@@ -34,7 +34,7 @@ namespace EduHealth.Services.Implementations
                 return (Array.Empty<CatalogItemDto>(), 0, 0, NormalizePage(query.Page), NormalizePageSize(query.PageSize));
             }
 
-            var keyword = query.Keyword?.Trim();
+            var keyword = query.Keyword?.Trim().ToLowerInvariant();
             var status = query.Status?.Trim().ToUpperInvariant();
             if (!string.IsNullOrWhiteSpace(status) && !AllowedStatuses.Contains(status))
             {
@@ -44,72 +44,119 @@ namespace EduHealth.Services.Implementations
             var page = NormalizePage(query.Page);
             var pageSize = NormalizePageSize(query.PageSize);
 
-            IQueryable<CatalogItemDto> q = group switch
+            // Since all underlying data only represent "ACTIVE" records
+            if (!string.IsNullOrWhiteSpace(status) && status != "ACTIVE")
             {
-                "vaccines" => _context.Vaccinations
-                    .AsNoTracking()
-                    .Select(x => new CatalogItemDto
-                    {
-                        Id = $"VAC{x.VaccinationId:D3}",
-                        Group = "vaccines",
-                        Code = $"VAC-{x.VaccinationId:D3}",
-                        Name = x.Name,
-                        Description = null,
-                        Status = "ACTIVE",
-                        CreatedAt = null,
-                        UpdatedAt = null
-                    }),
-
-                "diseases" => _context.DiseaseTypes
-                    .AsNoTracking()
-                    .Select(x => new CatalogItemDto
-                    {
-                        Id = x.Code,
-                        Group = "diseases",
-                        Code = x.Code,
-                        Name = x.DiseaseName,
-                        Description = x.Description,
-                        Status = "ACTIVE",
-                        CreatedAt = null,
-                        UpdatedAt = null
-                    }),
-
-                _ => _context.AllergyTypes
-                    .AsNoTracking()
-                    .Select(x => new CatalogItemDto
-                    {
-                        Id = $"ALG{x.AllergyId:D3}",
-                        Group = "allergies",
-                        Code = $"ALG-{x.AllergyId:D3}",
-                        Name = x.AllergyName,
-                        Description = x.Severity,
-                        Status = "ACTIVE",
-                        CreatedAt = null,
-                        UpdatedAt = null
-                    })
-            };
-
-            if (!string.IsNullOrWhiteSpace(keyword))
-            {
-                var kw = keyword.ToLower();
-                q = q.Where(x => x.Code.ToLower().Contains(kw) || x.Name.ToLower().Contains(kw));
+                return (Array.Empty<CatalogItemDto>(), 0, 0, page, pageSize);
             }
 
-            if (!string.IsNullOrWhiteSpace(status))
+            if (group == "vaccines")
             {
-                q = q.Where(x => x.Status == status);
+                var q = _context.Vaccinations.AsNoTracking();
+
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    if ((keyword.StartsWith("vac-") || keyword.StartsWith("vac")) && TryParseKeywordId(keyword, "vac-", "vac", out int id))
+                    {
+                        q = q.Where(x => x.VaccinationId == id || x.Name.ToLower().Contains(keyword));
+                    }
+                    else
+                    {
+                        q = q.Where(x => x.Name.ToLower().Contains(keyword) || x.VaccinationId.ToString().Contains(keyword));
+                    }
+                }
+
+                var totalItems = await q.CountAsync(cancellationToken);
+                var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
+
+                var dbItems = await q.OrderBy(x => x.VaccinationId)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync(cancellationToken);
+
+                var items = dbItems.Select(x => new CatalogItemDto
+                {
+                    Id = $"VAC{x.VaccinationId:D3}",
+                    Group = "vaccines",
+                    Code = $"VAC-{x.VaccinationId:D3}",
+                    Name = x.Name,
+                    Description = null,
+                    Status = "ACTIVE",
+                    CreatedAt = null,
+                    UpdatedAt = null
+                }).ToList();
+
+                return (items, totalItems, totalPages, page, pageSize);
             }
+            else if (group == "diseases")
+            {
+                var q = _context.DiseaseTypes.AsNoTracking();
 
-            q = q.OrderBy(x => x.Code);
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    q = q.Where(x => x.Code.ToLower().Contains(keyword) || x.DiseaseName.ToLower().Contains(keyword));
+                }
 
-            var totalItems = await q.CountAsync(cancellationToken);
-            var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
+                var totalItems = await q.CountAsync(cancellationToken);
+                var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
 
-            var items = await q.Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync(cancellationToken);
+                var dbItems = await q.OrderBy(x => x.Code)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync(cancellationToken);
 
-            return (items, totalItems, totalPages, page, pageSize);
+                var items = dbItems.Select(x => new CatalogItemDto
+                {
+                    Id = x.Code,
+                    Group = "diseases",
+                    Code = x.Code,
+                    Name = x.DiseaseName,
+                    Description = x.Description,
+                    Status = "ACTIVE",
+                    CreatedAt = null,
+                    UpdatedAt = null
+                }).ToList();
+
+                return (items, totalItems, totalPages, page, pageSize);
+            }
+            else // allergies
+            {
+                var q = _context.AllergyTypes.AsNoTracking();
+
+                if (!string.IsNullOrWhiteSpace(keyword))
+                {
+                    if ((keyword.StartsWith("alg-") || keyword.StartsWith("alg")) && TryParseKeywordId(keyword, "alg-", "alg", out int id))
+                    {
+                        q = q.Where(x => x.AllergyId == id || x.AllergyName.ToLower().Contains(keyword));
+                    }
+                    else
+                    {
+                        q = q.Where(x => x.AllergyName.ToLower().Contains(keyword) || x.AllergyId.ToString().Contains(keyword));
+                    }
+                }
+
+                var totalItems = await q.CountAsync(cancellationToken);
+                var totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize);
+
+                var dbItems = await q.OrderBy(x => x.AllergyId)
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync(cancellationToken);
+
+                var items = dbItems.Select(x => new CatalogItemDto
+                {
+                    Id = $"ALG{x.AllergyId:D3}",
+                    Group = "allergies",
+                    Code = $"ALG-{x.AllergyId:D3}",
+                    Name = x.AllergyName,
+                    Description = x.Severity,
+                    Status = "ACTIVE",
+                    CreatedAt = null,
+                    UpdatedAt = null
+                }).ToList();
+
+                return (items, totalItems, totalPages, page, pageSize);
+            }
         }
 
         public async Task<(bool Found, CatalogItemDto? Data)> GetItemByIdAsync(string id, CancellationToken cancellationToken)
@@ -189,6 +236,18 @@ namespace EduHealth.Services.Implementations
             value = 0;
             if (id.Length < 4) return false;
             return int.TryParse(id[3..], out value);
+        }
+
+        private static bool TryParseKeywordId(string keyword, string prefix1, string prefix2, out int id)
+        {
+            id = 0;
+            string numPart = keyword;
+            if (keyword.StartsWith(prefix1))
+                numPart = keyword[prefix1.Length..];
+            else if (keyword.StartsWith(prefix2))
+                numPart = keyword[prefix2.Length..];
+
+            return int.TryParse(numPart, out id);
         }
     }
 }

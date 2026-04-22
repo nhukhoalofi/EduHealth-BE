@@ -104,6 +104,7 @@ builder.Services.AddScoped<ISystemLogService, SystemLogService>();
 
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IReportService, ReportService>();
 
 var app = builder.Build();
 
