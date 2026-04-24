@@ -18,8 +18,6 @@ namespace EduHealth.Controllers
             _reportService = reportService;
         }
 
-        // ---------- ADMIN REPORTS ---------- //
-
         [HttpGet("admin/dashboard")]
         [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> GetAdminDashboard(CancellationToken cancellationToken)
@@ -27,7 +25,11 @@ namespace EduHealth.Controllers
             var data = await _reportService.GetAdminDashboardAsync(cancellationToken);
             return Ok(new ApiResponseV2<AdminReportDashboardDto>
             {
-                Success = true, Message = "Lấy dữ liệu dashboard admin thành công", Data = data, Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier
+                Success = true,
+                Message = "Lấy dữ liệu dashboard admin thành công",
+                Data = data,
+                Timestamp = DateTime.UtcNow,
+                TraceId = HttpContext.TraceIdentifier
             });
         }
 
@@ -35,13 +37,25 @@ namespace EduHealth.Controllers
         [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> GetAdminClassReport([FromRoute] int classId, CancellationToken cancellationToken)
         {
-            var data = await _reportService.GetClassReportAsync(classId, cancellationToken);
-            if (data == null) 
-                return NotFound(new ApiErrorResponseV2 { Success = false, Message = "Không tìm thấy lớp học.", Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier });
-
-            return Ok(new ApiResponseV2<ReportClassDto>
+            var detail = await _reportService.GetAdminClassDetailAsync(classId, cancellationToken);
+            if (detail == null)
             {
-                Success = true, Message = "Lấy dữ liệu báo cáo lớp thành công", Data = data, Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier
+                return NotFound(new ApiErrorResponseV2
+                {
+                    Success = false,
+                    Message = "Không tìm thấy lớp học.",
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+
+            return Ok(new ApiResponseV2<AdminClassDetailEnvelopeDto>
+            {
+                Success = true,
+                Message = "Lấy dữ liệu báo cáo lớp thành công",
+                Data = new AdminClassDetailEnvelopeDto { Detail = detail },
+                Timestamp = DateTime.UtcNow,
+                TraceId = HttpContext.TraceIdentifier
             });
         }
 
@@ -49,16 +63,25 @@ namespace EduHealth.Controllers
         [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> ExportAdminReport([FromQuery] ExportRequestDto request, CancellationToken cancellationToken)
         {
-            var data = await _reportService.ExportReportAsync(request, cancellationToken);
-            return Ok(new ApiResponseV2<ExportResponseDto> { Success = true, Message = "Xuất báo cáo thành công", Data = data, Timestamp = DateTime.UtcNow });
+            var file = await _reportService.ExportReportXlsxAsync(request, cancellationToken);
+            return File(file.FileBytes, file.ContentType, file.FileName);
         }
 
         [HttpPost("admin/directives")]
         [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> CreateDirective([FromBody] DirectiveRequestDto request, CancellationToken cancellationToken)
         {
-            var data = await _reportService.CreateDirectiveAsync(request, cancellationToken);
-            return Ok(new ApiResponseV2<DirectiveResponseDto> { Success = true, Message = "Tạo chỉ đạo thành công", Data = data, Timestamp = DateTime.UtcNow });
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _ = int.TryParse(userIdClaim, out var adminUserId);
+
+            var data = await _reportService.CreateDirectiveAsync(request, adminUserId, cancellationToken);
+            return Ok(new ApiResponseV2<DirectiveResponseDto>
+            {
+                Success = true,
+                Message = "Tạo chỉ đạo thành công",
+                Data = data,
+                Timestamp = DateTime.UtcNow
+            });
         }
 
         [HttpGet("admin/system-logs/summary")]
@@ -112,8 +135,6 @@ namespace EduHealth.Controllers
             return Ok(new ApiResponseV2<AdminNotificationResponseDto> { Success = true, Message = "Gửi thông báo thành công.", Data = data, Timestamp = DateTime.UtcNow });
         }
 
-        // ---------- NURSE REPORTS ---------- //
-
         [HttpGet("nurse/dashboard")]
         [Authorize(Roles = "NURSE")]
         public async Task<IActionResult> GetNurseDashboard(CancellationToken cancellationToken)
@@ -129,7 +150,7 @@ namespace EduHealth.Controllers
         public async Task<IActionResult> GetNurseClassReport([FromRoute] int classId, CancellationToken cancellationToken)
         {
             var data = await _reportService.GetClassReportAsync(classId, cancellationToken);
-            if (data == null) 
+            if (data == null)
                 return NotFound(new ApiErrorResponseV2 { Success = false, Message = "Không tìm thấy lớp học.", Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier });
 
             return Ok(new ApiResponseV2<ReportClassDto> { Success = true, Message = "Lấy dữ liệu báo cáo lớp thành công", Data = data, Timestamp = DateTime.UtcNow });
@@ -139,8 +160,8 @@ namespace EduHealth.Controllers
         [Authorize(Roles = "NURSE")]
         public async Task<IActionResult> ExportNurseReport([FromQuery] ExportRequestDto request, CancellationToken cancellationToken)
         {
-            var data = await _reportService.ExportReportAsync(request, cancellationToken);
-            return Ok(new ApiResponseV2<ExportResponseDto> { Success = true, Message = "Xuất báo cáo thành công", Data = data, Timestamp = DateTime.UtcNow });
+            var file = await _reportService.ExportReportXlsxAsync(request, cancellationToken);
+            return File(file.FileBytes, file.ContentType, file.FileName);
         }
     }
 }

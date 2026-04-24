@@ -1,17 +1,145 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace EduHealth.DTOs.Reports
 {
     public class AdminReportDashboardDto
     {
-        public int TotalStudents { get; set; }
-        public int TotalClasses { get; set; }
-        public int TotalHealthVisits { get; set; }
-        public int TotalVaccinationCampaigns { get; set; }
-        public int MedicineWarningsCount { get; set; }
-        public int NotificationsSentCount { get; set; }
-        public int SystemLogsCount { get; set; }
-        public HealthSummaryDto HealthSummary { get; set; } = new();
+        public ReportHeaderDto Header { get; set; } = new();
+        public List<ReportSummaryCardDto> SummaryCards { get; set; } = new();
+        public List<ReportChartDataDto> ChartData { get; set; } = new();
+        public List<ReportClassRowDto> ClassRows { get; set; } = new();
+        public ReportSidePanelDto SidePanel { get; set; } = new();
+    }
+
+    public class ReportHeaderDto
+    {
+        public string Title { get; set; } = "Báo cáo quản trị y tế học đường";
+        public string Description { get; set; } = "Đánh giá tổng quát sức khỏe học sinh toàn trường.";
+    }
+
+    public class ReportSummaryCardDto
+    {
+        public string Id { get; set; } = null!;
+        public string Label { get; set; } = null!;
+        public string Value { get; set; } = null!;
+        public string? Note { get; set; }
+        public int? Progress { get; set; }
+    }
+
+    public class ReportChartDataDto
+    {
+        public int ClassId { get; set; }
+        public string Label { get; set; } = null!;
+        public int Stable { get; set; }
+        public int FollowUp { get; set; }
+        public int HighRisk { get; set; }
+        public int StablePct { get; set; }
+        public int FollowUpPct { get; set; }
+        public int HighRiskPct { get; set; }
+    }
+
+    public class ReportClassRowDto
+    {
+        public int ClassId { get; set; }
+        public string ClassName { get; set; } = null!;
+        public int ClassSize { get; set; }
+        public int Stable { get; set; }
+        public int FollowUp { get; set; }
+        public int HighRisk { get; set; }
+        public int VaccinationCompletionRate { get; set; }
+        public string RiskLabel { get; set; } = null!;
+        public string RiskTone { get; set; } = null!;
+        public string RowTone { get; set; } = null!;
+    }
+
+    public class ReportSidePanelDto
+    {
+        public List<HighPriorityAlertDto> HighPriorityAlerts { get; set; } = new();
+        public List<LowSupplyDto> LowSupplies { get; set; } = new();
+        public List<LowVaccinationCoverageDto> LowVaccinationCoverage { get; set; } = new();
+    }
+
+    public class HighPriorityAlertDto
+    {
+        public string Id { get; set; } = null!;
+        public int ClassId { get; set; }
+        public string ClassName { get; set; } = null!;
+        public string Severity { get; set; } = null!;
+        public string SeverityTone { get; set; } = null!;
+        public string Description { get; set; } = null!;
+        public string Metric { get; set; } = null!;
+        public string UpdatedAt { get; set; } = null!;
+        public string UpdatedAtShort { get; set; } = null!;
+    }
+
+    public class LowSupplyDto
+    {
+        public string Id { get; set; } = null!;
+        public string Name { get; set; } = null!;
+        public string Remaining { get; set; } = null!;
+        public string Tone { get; set; } = null!;
+        public string ThresholdLabel { get; set; } = null!;
+    }
+
+    public class LowVaccinationCoverageDto
+    {
+        public string Id { get; set; } = null!;
+        public string Label { get; set; } = null!;
+        public int Coverage { get; set; }
+        public string Tone { get; set; } = null!;
+        public string? Note { get; set; }
+    }
+
+    public class AdminClassDetailEnvelopeDto
+    {
+        public AdminClassDetailDto? Detail { get; set; }
+    }
+
+    public class AdminClassDetailDto
+    {
+        public int ClassId { get; set; }
+        public string ClassName { get; set; } = null!;
+        public int StudentCount { get; set; }
+        public string TeacherName { get; set; } = string.Empty;
+        public string UrgencyLabel { get; set; } = null!;
+        public string UrgencyTone { get; set; } = null!;
+        public RecipientStatsDto RecipientStats { get; set; } = new();
+        public ClassDistributionDto Distribution { get; set; } = new();
+        public ClassVaccinationDto Vaccination { get; set; } = new();
+        public List<string> HighlightedIssues { get; set; } = new();
+        public List<RiskAnalysisItemDto> RiskAnalysis { get; set; } = new();
+    }
+
+    public class RecipientStatsDto
+    {
+        public int Students { get; set; }
+    }
+
+    public class ClassDistributionDto
+    {
+        public int Stable { get; set; }
+        public int FollowUp { get; set; }
+        public int HighRisk { get; set; }
+        public int StablePct { get; set; }
+        public int FollowUpPct { get; set; }
+        public int HighRiskPct { get; set; }
+    }
+
+    public class ClassVaccinationDto
+    {
+        public int CompletionRate { get; set; }
+        public int Completed { get; set; }
+        public int Pending { get; set; }
+        public string StatusLabel { get; set; } = null!;
+        public string StatusTone { get; set; } = null!;
+    }
+
+    public class RiskAnalysisItemDto
+    {
+        public string Id { get; set; } = null!;
+        public string Tone { get; set; } = null!;
+        public string Title { get; set; } = null!;
+        public string Description { get; set; } = null!;
     }
 
     public class NurseReportDashboardDto
@@ -52,29 +180,26 @@ namespace EduHealth.DTOs.Reports
     public class ExportRequestDto
     {
         [Required]
-        [RegularExpression("^(pdf|xlsx)$", ErrorMessage = "Format must be pdf or xlsx")]
-        public string Format { get; set; } = "pdf";
+        [RegularExpression("^(xlsx|pdf)$", ErrorMessage = "Format must be xlsx or pdf")]
+        public string Format { get; set; } = "xlsx";
         public DateTime? FromDate { get; set; }
         public DateTime? ToDate { get; set; }
         public int? ClassId { get; set; }
     }
 
-    public class ExportResponseDto
+    public class ExportFileDto
     {
         public string FileName { get; set; } = null!;
-        public string DownloadUrl { get; set; } = null!;
-        public DateTime ExpiresAt { get; set; }
+        public string ContentType { get; set; } = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        public byte[] FileBytes { get; set; } = Array.Empty<byte>();
     }
 
     public class DirectiveRequestDto
     {
         public int? ClassId { get; set; }
-        [Required]
-        public string Title { get; set; } = null!;
-        [Required]
-        public string Content { get; set; } = null!;
-        [Required]
-        public string Priority { get; set; } = "NORMAL";
+        [Required] public string Title { get; set; } = null!;
+        [Required] public string Content { get; set; } = null!;
+        [Required] public string Priority { get; set; } = "NORMAL";
         public DateTime? RelatedReportDate { get; set; }
     }
 
@@ -120,12 +245,9 @@ namespace EduHealth.DTOs.Reports
 
     public class AdminNotificationRequestDto
     {
-        [Required]
-        public string Title { get; set; } = null!;
-        [Required]
-        public string Content { get; set; } = null!;
-        [Required]
-        public string Type { get; set; } = null!;
+        [Required] public string Title { get; set; } = null!;
+        [Required] public string Content { get; set; } = null!;
+        [Required] public string Type { get; set; } = null!;
         public int? ClassId { get; set; }
         public List<int>? RecipientUserIds { get; set; }
         public int? RelatedDirectiveId { get; set; }
