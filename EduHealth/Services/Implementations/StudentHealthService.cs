@@ -20,10 +20,12 @@ namespace EduHealth.Services.Implementations
         };
 
         private readonly AppDbContext _context;
+        private readonly ISystemLogWriter _logWriter;
 
-        public StudentHealthService(AppDbContext context)
+        public StudentHealthService(AppDbContext context, ISystemLogWriter logWriter)
         {
             _context = context;
+            _logWriter = logWriter;
         }
 
         public async Task<IReadOnlyList<AllergyTypeLookupItemDto>> GetAllergyTypesAsync(CancellationToken cancellationToken = default)
@@ -385,6 +387,19 @@ namespace EduHealth.Services.Implementations
 
             await _context.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "HEALTH_PROFILES",
+                Action = "UPDATE_HEALTH_PROFILE",
+                TargetType = "HealthProfile",
+                TargetId = $"STD{student.UserId:D3}",
+                TargetLabel = student.FullName,
+                Description = "Cập nhật hồ sơ sức khỏe học sinh",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var data = await GetHealthProfileAsync(studentUserId, cancellationToken);
             return (true, "Cập nhật hồ sơ sức khỏe thành công.", null, data);

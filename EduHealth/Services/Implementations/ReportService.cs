@@ -2,6 +2,7 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Reports;
+using EduHealth.DTOs.Dashboard;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
@@ -21,7 +22,16 @@ namespace EduHealth.Services.Implementations
 
         public async Task<AdminReportDashboardDto> GetAdminDashboardAsync(CancellationToken cancellationToken)
         {
-            var aggregate = await BuildAggregateAsync(null, cancellationToken);
+            var filter = new AdminDashboardFilterDto();
+            return await GetAdminDashboardAsync(filter, cancellationToken);
+        }
+
+        public async Task<AdminReportDashboardDto> GetAdminDashboardAsync(AdminDashboardFilterDto filter, CancellationToken cancellationToken)
+        {
+            // Determine classId from filter or null for all classes
+            int? classId = filter?.ClassId;
+            
+            var aggregate = await BuildAggregateAsync(classId, filter, cancellationToken);
 
             return new AdminReportDashboardDto
             {
@@ -291,108 +301,552 @@ namespace EduHealth.Services.Implementations
             };
         }
 
-        public async Task<NurseReportDashboardDto> GetNurseDashboardAsync(int nurseId, CancellationToken cancellationToken)
+        // ===== NURSE REPORT METHODS =====
+
+        public async Task<NurseReportDashboardDto> GetNurseDashboardAsync(
+            string timeRange,
+            DateTime? fromDate,
+            DateTime? toDate,
+            string? grade,
+            string? classId,
+            string? reportType,
+            CancellationToken cancellationToken = default)
         {
-            return new NurseReportDashboardDto
+            // Resolve date range
+            var (startDate, endDate) = ResolveDateRange(timeRange, fromDate, toDate);
+
+            // Build class query
+            var classesQuery = _context.SchoolClasses.AsNoTracking();
+            if (!string.IsNullOrWhiteSpace(grade) && grade != "all")
             {
-                TotalAssignedStudents = 320,
-                TotalAssignedClasses = 8,
-                TodayHealthVisits = 12,
-                ExpiringMedicinesCount = await _context.Medicines.CountAsync(m => m.StockQuantity <= m.WarningThreshold, cancellationToken),
-                PendingVaccinationsCount = 8,
-                HealthSummary = new HealthSummaryDto { Healthy = 300, Sick = 15, Chronic = 5 }
-            };
-        }
-
-        public async Task<AdminNotificationPreviewResponseDto> PreviewNotificationsAsync(AdminNotificationPreviewRequestDto request, CancellationToken cancellationToken)
-        {
-            var recipients = new List<NotificationRecipientPreviewDto>();
-
-            if (request.ClassId.HasValue)
-            {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                var users = await _context.Users
-                    .Where(u => studentUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                var users = await _context.Users
-                    .Where(u => request.RecipientUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
+                classesQuery = classesQuery.Where(c => c.Grade == grade);
             }
 
-            return new AdminNotificationPreviewResponseDto
+            int? filterClassId = null;
+            if (!string.IsNullOrWhiteSpace(classId) && classId != "all" && int.TryParse(classId, out var parsedClassId))
             {
-                TotalRecipients = recipients.Count,
-                Recipients = recipients
-            };
-        }
-
-        public async Task<AdminNotificationResponseDto> SendNotificationsAsync(AdminNotificationRequestDto request, int adminId, CancellationToken cancellationToken)
-        {
-            var userIdsToNotify = new HashSet<int>();
-
-            if (request.ClassId.HasValue)
-            {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in studentUserIds) userIdsToNotify.Add(id);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                foreach (var id in request.RecipientUserIds) userIdsToNotify.Add(id);
+                filterClassId = parsedClassId;
+                classesQuery = classesQuery.Where(c => c.ClassId == parsedClassId);
             }
 
-            var notification = new Notification
-            {
-                Title = request.Title,
-                Content = request.Content,
-                Type = request.Type,
-                CreatedByUserId = adminId,
-                CreatedAt = DateTime.UtcNow,
-                ClassId = request.ClassId
-            };
+            var classes = await classesQuery
+                .OrderBy(c => c.Grade)
+                .ThenBy(c => c.ClassName)
+                .ToListAsync(cancellationToken);
 
-            foreach (var userId in userIdsToNotify)
+            var classIds = classes.Select(c => c.ClassId).ToList();
+
+            // Get class options for filter
+            var allClasses = await _context.SchoolClasses.AsNoTracking().OrderBy(c => c.Grade).ThenBy(c => c.ClassName).ToListAsync(cancellationToken);
+            var classOptions = allClasses.Select(c => new FilterOptionItemDto { Value = c.ClassId.ToString(), Label = c.ClassName }).ToList();
+
+            var gradeOptions = allClasses.Select(c => c.Grade).Distinct().OrderBy(g => g)
+                .Select(g => new FilterOptionItemDto { Value = g, Label = $"Khối {g}" }).ToList();
+
+            // Build nurse class rows
+            var classRows = new List<NurseClassRowDto>();
+            foreach (var cls in classes)
             {
-                notification.Recipients.Add(new NotificationRecipient
+                var studentCount = await _context.Students.CountAsync(s => s.ClassId == cls.ClassId && s.User.IsActive, cancellationToken);
+
+                var examinationCount = await _context.HealthVisits.CountAsync(
+                    v => v.Student.ClassId == cls.ClassId && v.VisitDate >= startDate && v.VisitDate <= endDate,
+                    cancellationToken);
+
+                var trackingStudents = await _context.HealthVisits
+                    .AsNoTracking()
+                    .Where(v => v.Student.ClassId == cls.ClassId && v.VisitDate >= startDate && v.VisitDate <= endDate)
+                    .Select(v => v.StudentUserId)
+                    .Distinct()
+                    .CountAsync(cancellationToken);
+
+                var medicineDispenseCount = await _context.VisitPrescriptions
+                    .AsNoTracking()
+                    .Where(vp => vp.HealthVisit.Student.ClassId == cls.ClassId && 
+                                  vp.HealthVisit.VisitDate >= startDate && 
+                                  vp.HealthVisit.VisitDate <= endDate)
+                    .SumAsync(vp => vp.Quantity, cancellationToken);
+
+                var totalVaccinations = await _context.StudentVaccinations
+                    .AsNoTracking()
+                    .Where(sv => sv.Student.ClassId == cls.ClassId)
+                    .CountAsync(cancellationToken);
+
+                var completedVaccinations = await _context.StudentVaccinations
+                    .AsNoTracking()
+                    .Where(sv => sv.Student.ClassId == cls.ClassId && sv.Status == "DONE")
+                    .CountAsync(cancellationToken);
+
+                var vaccinationRate = totalVaccinations == 0 ? 0 : (int)Math.Round(completedVaccinations * 100.0 / totalVaccinations);
+
+                // Determine status
+                var hasContagious = await _context.HealthVisits
+                    .AsNoTracking()
+                    .AnyAsync(v => v.Student.ClassId == cls.ClassId && 
+                                    v.VisitDate >= startDate && 
+                                    v.VisitDate <= endDate &&
+                                    v.DiseaseType != null &&
+                                    v.DiseaseType.IsContagious,
+                    cancellationToken);
+
+                string status = "safe";
+                if (hasContagious)
+                    status = "alert";
+                else if (vaccinationRate < 70 || trackingStudents > 0)
+                    status = "watch";
+
+                classRows.Add(new NurseClassRowDto
                 {
-                    UserId = userId,
-                    IsRead = false,
-                    SentAt = DateTime.UtcNow,
-                    Status = "SENT"
+                    Id = cls.ClassId,
+                    ClassName = cls.ClassName,
+                    Grade = cls.Grade,
+                    GradeLabel = $"Khối {cls.Grade}",
+                    StudentCount = studentCount,
+                    ExaminationCount = examinationCount,
+                    TrackingCount = trackingStudents,
+                    MedicineDispenseCount = medicineDispenseCount,
+                    VaccinationRate = vaccinationRate,
+                    Status = status
                 });
             }
 
-            _context.Notifications.Add(notification);
-            await _context.SaveChangesAsync(cancellationToken);
+            // Disease breakdown
+            var diseaseBreakdown = await GetDiseaseBreakdownAsync(classIds, startDate, endDate, cancellationToken);
 
-            return new AdminNotificationResponseDto
+            // Top medicines
+            var topMedicines = await GetTopMedicinesAsync(classIds, startDate, endDate, cancellationToken);
+
+            // Risk alerts
+            var riskAlerts = await BuildRiskAlertsAsync(classIds, startDate, endDate, cancellationToken);
+
+            // Trend data
+            var trend = await BuildTrendAsync(classIds, startDate, endDate, reportType ?? "overview", cancellationToken);
+
+            return new NurseReportDashboardDto
             {
-                NotificationId = notification.NotificationId,
-                Status = "SENT",
-                RecipientCount = notification.Recipients.Count
+                Header = new ReportHeaderDto
+                {
+                    Title = "Báo cáo y tế tổng hợp",
+                    Description = "Báo cáo hoạt động y tế theo từng lớp học"
+                },
+                AppliedFilters = new NurseAppliedFiltersDto
+                {
+                    TimeRange = timeRange,
+                    Grade = grade ?? "all",
+                    ClassId = classId ?? "all",
+                    ReportType = reportType ?? "overview"
+                },
+                FilterOptions = new NurseFilterOptionsDto
+                {
+                    ClassOptions = classOptions,
+                    GradeOptions = gradeOptions
+                },
+                Trend = trend,
+                DiseaseBreakdown = diseaseBreakdown,
+                TopMedicines = topMedicines,
+                RiskAlerts = riskAlerts,
+                ClassRows = classRows,
+                GeneratedAt = DateTime.UtcNow
             };
+        }
+
+        public async Task<NurseClassDetailReportDto?> GetNurseClassDetailAsync(
+            int classId,
+            string timeRange,
+            DateTime? fromDate,
+            DateTime? toDate,
+            CancellationToken cancellationToken = default)
+        {
+            var cls = await _context.SchoolClasses
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.ClassId == classId, cancellationToken);
+
+            if (cls == null)
+                return null;
+
+            var (startDate, endDate) = ResolveDateRange(timeRange, fromDate, toDate);
+
+            var studentCount = await _context.Students
+                .CountAsync(s => s.ClassId == classId && s.User.IsActive, cancellationToken);
+
+            var examinationCount = await _context.HealthVisits
+                .CountAsync(v => v.Student.ClassId == classId && v.VisitDate >= startDate && v.VisitDate <= endDate, cancellationToken);
+
+            var students = await _context.Students
+                .AsNoTracking()
+                .Include(s => s.User)
+                .Where(s => s.ClassId == classId && s.User.IsActive)
+                .ToListAsync(cancellationToken);
+
+            var studentSummaries = new List<StudentHealthSummaryDto>();
+            foreach (var student in students)
+            {
+                var visits = await _context.HealthVisits
+                    .AsNoTracking()
+                    .Where(v => v.StudentUserId == student.UserId && v.VisitDate >= startDate && v.VisitDate <= endDate)
+                    .OrderByDescending(v => v.VisitDate)
+                    .ToListAsync(cancellationToken);
+
+                studentSummaries.Add(new StudentHealthSummaryDto
+                {
+                    UserId = student.UserId,
+                    FullName = student.FullName,
+                    ExaminationCount = visits.Count,
+                    LastDiagnosis = visits.FirstOrDefault()?.Diagnosis,
+                    LastVisitDate = visits.FirstOrDefault()?.VisitDate
+                });
+            }
+
+            var diseaseBreakdown = await GetDiseaseBreakdownAsync(new List<int> { classId }, startDate, endDate, cancellationToken);
+            var medicinesUsed = await GetTopMedicinesAsync(new List<int> { classId }, startDate, endDate, cancellationToken);
+
+            var totalVaccinations = await _context.StudentVaccinations
+                .AsNoTracking()
+                .Where(sv => sv.Student.ClassId == classId)
+                .CountAsync(cancellationToken);
+
+            var completedVaccinations = await _context.StudentVaccinations
+                .AsNoTracking()
+                .Where(sv => sv.Student.ClassId == classId && sv.Status == "DONE")
+                .CountAsync(cancellationToken);
+
+            var vaccinationRate = totalVaccinations == 0 ? 0 : (int)Math.Round(completedVaccinations * 100.0 / totalVaccinations);
+
+            return new NurseClassDetailReportDto
+            {
+                ClassId = classId,
+                ClassName = cls.ClassName,
+                Grade = cls.Grade,
+                StudentCount = studentCount,
+                ExaminationCount = examinationCount,
+                Students = studentSummaries,
+                DiseaseBreakdown = diseaseBreakdown,
+                MedicinesUsed = medicinesUsed,
+                Vaccination = new VaccinationSummaryDto
+                {
+                    TotalRecords = totalVaccinations,
+                    CompletedCount = completedVaccinations,
+                    PendingCount = totalVaccinations - completedVaccinations,
+                    CompletionRate = vaccinationRate
+                }
+            };
+        }
+
+        public async Task<ExportFileDto> ExportNurseReportAsync(
+            string format,
+            string timeRange,
+            DateTime? fromDate,
+            DateTime? toDate,
+            string? grade,
+            string? classId,
+            string? reportType,
+            CancellationToken cancellationToken = default)
+        {
+            var dashboard = await GetNurseDashboardAsync(timeRange, fromDate, toDate, grade, classId, reportType, cancellationToken);
+
+            if (format == "pdf")
+            {
+                // PDF export not implemented - return Excel instead
+                format = "xlsx";
+            }
+
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.Worksheets.Add("Báo cáo");
+
+            var row = 1;
+            sheet.Cell(row, 1).Value = dashboard.Header.Title;
+            sheet.Cell(row, 1).Style.Font.Bold = true;
+            sheet.Cell(row, 1).Style.Font.FontSize = 14;
+            row += 2;
+
+            sheet.Cell(row, 1).Value = "Lớp";
+            sheet.Cell(row, 2).Value = "Khối";
+            sheet.Cell(row, 3).Value = "Số HS";
+            sheet.Cell(row, 4).Value = "Lần Khám";
+            sheet.Cell(row, 5).Value = "HS Theo Dõi";
+            sheet.Cell(row, 6).Value = "Cấp Thuốc";
+            sheet.Cell(row, 7).Value = "Tiêm (%)";
+            sheet.Cell(row, 8).Value = "Trạng Thái";
+            sheet.Range(row, 1, row, 8).Style.Font.Bold = true;
+            row++;
+
+            foreach (var classRow in dashboard.ClassRows)
+            {
+                sheet.Cell(row, 1).Value = classRow.ClassName;
+                sheet.Cell(row, 2).Value = classRow.Grade;
+                sheet.Cell(row, 3).Value = classRow.StudentCount;
+                sheet.Cell(row, 4).Value = classRow.ExaminationCount;
+                sheet.Cell(row, 5).Value = classRow.TrackingCount;
+                sheet.Cell(row, 6).Value = classRow.MedicineDispenseCount;
+                sheet.Cell(row, 7).Value = $"{classRow.VaccinationRate}%";
+                sheet.Cell(row, 8).Value = classRow.Status;
+                row++;
+            }
+
+            sheet.Columns("A:H").AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+
+            return new ExportFileDto
+            {
+                FileName = $"NurseReport_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx",
+                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                FileBytes = stream.ToArray()
+            };
+        }
+
+        private (DateTime, DateTime) ResolveDateRange(string timeRange, DateTime? fromDate, DateTime? toDate)
+        {
+            var now = DateTime.UtcNow.Date;
+
+            if (timeRange == "this-week")
+                return (now.AddDays(-(int)now.DayOfWeek), now);
+            else if (timeRange == "this-month")
+                return (new DateTime(now.Year, now.Month, 1), now);
+            else if (timeRange == "this-quarter")
+            {
+                var quarter = (now.Month - 1) / 3;
+                var qStart = new DateTime(now.Year, quarter * 3 + 1, 1);
+                return (qStart, now);
+            }
+            else if (timeRange == "custom-range")
+                return (fromDate?.Date ?? now, toDate?.Date ?? now);
+            else
+                return (now.AddMonths(-1), now);
+        }
+
+        private async Task<List<DiseaseBreakdownItemDto>> GetDiseaseBreakdownAsync(
+            List<int> classIds,
+            DateTime startDate,
+            DateTime endDate,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<DiseaseBreakdownItemDto>();
+
+            var diseases = await _context.HealthVisits
+                .AsNoTracking()
+                .Where(v => classIds.Contains(v.Student.ClassId) && v.VisitDate >= startDate && v.VisitDate <= endDate)
+                .GroupBy(v => new { v.DiseaseId, v.DiseaseType!.DiseaseName })
+                .Select(g => new { g.Key.DiseaseId, g.Key.DiseaseName, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
+            foreach (var d in diseases)
+            {
+                result.Add(new DiseaseBreakdownItemDto
+                {
+                    Id = d.DiseaseId?.ToString() ?? "unknown",
+                    Label = d.DiseaseName ?? "Không xác định",
+                    Count = d.Count
+                });
+            }
+
+            return result;
+        }
+
+        private async Task<List<TopMedicineItemDto>> GetTopMedicinesAsync(
+            List<int> classIds,
+            DateTime startDate,
+            DateTime endDate,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<TopMedicineItemDto>();
+
+            var medicines = await _context.VisitPrescriptions
+                .AsNoTracking()
+                .Include(vp => vp.Medicine)
+                .Where(vp => classIds.Contains(vp.HealthVisit.Student.ClassId) &&
+                             vp.HealthVisit.VisitDate >= startDate &&
+                             vp.HealthVisit.VisitDate <= endDate)
+                .GroupBy(vp => new { vp.Medicine.MedicineId, vp.Medicine.Code, vp.Medicine.Name, vp.Medicine.ActiveIngredient, vp.Medicine.StockQuantity, vp.Medicine.WarningThreshold })
+                .Select(g => new 
+                { 
+                    g.Key.MedicineId,
+                    g.Key.Code,
+                    g.Key.Name,
+                    g.Key.ActiveIngredient,
+                    g.Key.StockQuantity,
+                    g.Key.WarningThreshold,
+                    UsedQuantity = g.Sum(x => x.Quantity)
+                })
+                .OrderByDescending(x => x.UsedQuantity)
+                .Take(10)
+                .ToListAsync(cancellationToken);
+
+            foreach (var m in medicines)
+            {
+                result.Add(new TopMedicineItemDto
+                {
+                    Id = m.Code,
+                    Name = m.Name,
+                    Category = m.ActiveIngredient ?? m.Code,
+                    UsedQuantity = m.UsedQuantity,
+                    StockStatus = m.StockQuantity <= m.WarningThreshold ? "low" : "normal"
+                });
+            }
+
+            return result;
+        }
+
+        private async Task<List<RiskAlertDto>> BuildRiskAlertsAsync(
+            List<int> classIds,
+            DateTime startDate,
+            DateTime endDate,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<RiskAlertDto>();
+            var alertId = 1;
+
+            // Check for contagious diseases
+            var contagiousCases = await _context.HealthVisits
+                .AsNoTracking()
+                .Where(v => classIds.Contains(v.Student.ClassId) &&
+                            v.VisitDate >= startDate &&
+                            v.VisitDate <= endDate &&
+                            v.DiseaseType != null &&
+                            v.DiseaseType.IsContagious)
+                .CountAsync(cancellationToken);
+
+            if (contagiousCases > 0)
+            {
+                result.Add(new RiskAlertDto
+                {
+                    Id = $"alert-{alertId++}",
+                    Type = "contagious_disease",
+                    Title = "Phát hiện bệnh truyền nhiễm",
+                    Description = $"Có {contagiousCases} ca bệnh truyền nhiễm được ghi nhận trong kỳ",
+                    Severity = "danger"
+                });
+            }
+
+            // Check for low stock medicines
+            var lowStockMedicines = await _context.Medicines
+                .AsNoTracking()
+                .Where(m => m.StockQuantity <= m.WarningThreshold)
+                .CountAsync(cancellationToken);
+
+            if (lowStockMedicines > 0)
+            {
+                result.Add(new RiskAlertDto
+                {
+                    Id = $"alert-{alertId++}",
+                    Type = "low_medicine_stock",
+                    Title = "Thuốc tồn kho thấp",
+                    Description = $"{lowStockMedicines} loại thuốc có tồn kho dưới mức cảnh báo",
+                    Severity = "warning"
+                });
+            }
+
+            // Check for incomplete vaccinations
+            var incompleteVaccinations = await _context.StudentVaccinations
+                .AsNoTracking()
+                .Where(sv => classIds.Contains(sv.Student.ClassId) && sv.Status != "DONE")
+                .CountAsync(cancellationToken);
+
+            if (incompleteVaccinations > 0)
+            {
+                result.Add(new RiskAlertDto
+                {
+                    Id = $"alert-{alertId++}",
+                    Type = "incomplete_vaccination",
+                    Title = "Tiêm chủng chưa hoàn tất",
+                    Description = $"{incompleteVaccinations} bản ghi tiêm chủng chưa được hoàn thành",
+                    Severity = "warning"
+                });
+            }
+
+            return result;
+        }
+
+        private async Task<List<TrendItemDto>> BuildTrendAsync(
+            List<int> classIds,
+            DateTime startDate,
+            DateTime endDate,
+            string reportType,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<TrendItemDto>();
+
+            var dayDiff = (endDate - startDate).Days;
+            var interval = dayDiff <= 7 ? 1 : dayDiff <= 30 ? 7 : 30;
+
+            var query = _context.HealthVisits
+                .AsNoTracking()
+                .Where(v => classIds.Contains(v.Student.ClassId) && 
+                            v.VisitDate >= startDate && 
+                            v.VisitDate <= endDate);
+
+            var visits = await query.ToListAsync(cancellationToken);
+
+            var groupedByPeriod = visits
+                .GroupBy(v => new DateTime(v.VisitDate.Year, v.VisitDate.Month, Math.Max(1, v.VisitDate.Day - (v.VisitDate.Day % interval))))
+                .OrderBy(g => g.Key)
+                .ToList();
+
+            foreach (var group in groupedByPeriod)
+            {
+                var label = group.Key.ToString("dd/MM");
+                result.Add(new TrendItemDto
+                {
+                    Label = label,
+                    Value = group.Count()
+                });
+            }
+
+            return result;
         }
 
         private async Task<ReportAggregate> BuildAggregateAsync(int? classId, CancellationToken cancellationToken)
         {
-            var students = await _context.Students.AsNoTracking()
-                .Where(s => !classId.HasValue || s.ClassId == classId.Value)
+            return await BuildAggregateAsync(classId, null, cancellationToken);
+        }
+
+        private async Task<ReportAggregate> BuildAggregateAsync(int? classId, AdminDashboardFilterDto? filter, CancellationToken cancellationToken)
+        {
+            var studentsQuery = _context.Students.AsNoTracking()
+                .Where(s => !classId.HasValue || s.ClassId == classId.Value);
+
+            // Apply disease type filter
+            if (filter?.DiseaseTypeId.HasValue == true)
+            {
+                var studentIdsWithDisease = await _context.HealthVisits.AsNoTracking()
+                    .Where(v => v.DiseaseId == filter.DiseaseTypeId.Value)
+                    .Select(v => v.StudentUserId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                if (studentIdsWithDisease.Count > 0)
+                {
+                    studentsQuery = studentsQuery.Where(s => studentIdsWithDisease.Contains(s.UserId));
+                }
+                else
+                {
+                    return new ReportAggregate();
+                }
+            }
+
+            // Apply vaccination campaign filter
+            if (filter?.VaccinationCampaignId.HasValue == true)
+            {
+                var studentIdsInCampaign = await _context.StudentVaccinations.AsNoTracking()
+                    .Where(sv => sv.CampaignId == filter.VaccinationCampaignId.Value)
+                    .Select(sv => sv.UserId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                if (studentIdsInCampaign.Count > 0)
+                {
+                    studentsQuery = studentsQuery.Where(s => studentIdsInCampaign.Contains(s.UserId));
+                }
+                else
+                {
+                    return new ReportAggregate();
+                }
+            }
+
+            var students = await studentsQuery
                 .Select(s => new StudentRow
                 {
                     UserId = s.UserId,
@@ -406,8 +860,21 @@ namespace EduHealth.Services.Implementations
 
             var studentIds = students.Select(s => s.UserId).ToHashSet();
 
-            var visits = await _context.HealthVisits.AsNoTracking()
-                .Where(v => studentIds.Contains(v.StudentUserId))
+            // Apply date filter to visits
+            var visitsQuery = _context.HealthVisits.AsNoTracking()
+                .Where(v => studentIds.Contains(v.StudentUserId));
+
+            if (filter?.FromDate.HasValue == true)
+            {
+                visitsQuery = visitsQuery.Where(v => v.VisitDate >= filter.FromDate.Value);
+            }
+
+            if (filter?.ToDate.HasValue == true)
+            {
+                visitsQuery = visitsQuery.Where(v => v.VisitDate <= filter.ToDate.Value);
+            }
+
+            var visits = await visitsQuery
                 .Select(v => new VisitRow
                 {
                     StudentUserId = v.StudentUserId,
@@ -416,9 +883,11 @@ namespace EduHealth.Services.Implementations
                 })
                 .ToListAsync(cancellationToken);
 
-            var latestVisitByStudent = visits
-                .GroupBy(v => v.StudentUserId)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.VisitDate).First());
+            var latestVisitByStudent = visits.Count > 0
+                ? visits
+                    .GroupBy(v => v.StudentUserId)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.VisitDate).First())
+                : new Dictionary<int, VisitRow>();
 
             var contagiousDiseaseIds = (await _context.DiseaseTypes.AsNoTracking()
                 .Where(d => d.IsContagious)

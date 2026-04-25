@@ -4,7 +4,8 @@ namespace EduHealth.DTOs.Notifications
     {
         public int UserId { get; set; }
         public string FullName { get; set; } = null!;
-        public int ClassId { get; set; }
-        public string ClassName { get; set; } = null!;
+        public string Role { get; set; } = null!;
+        public int? ClassId { get; set; }
+        public string? ClassName { get; set; }
     }
 }

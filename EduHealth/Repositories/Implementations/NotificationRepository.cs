@@ -36,6 +36,16 @@ namespace EduHealth.Repositories.Implementations
                 .ToListAsync(cancellationToken);
         }
 
+        public async Task<List<User>> GetUsersByIdsAsync(IReadOnlyList<int> userIds, CancellationToken cancellationToken = default)
+        {
+            var normalized = userIds.Distinct().ToList();
+
+            return await _context.Users
+                .AsNoTracking()
+                .Where(x => normalized.Contains(x.UserId) && x.IsActive)
+                .ToListAsync(cancellationToken);
+        }
+
         public async Task AddNotificationAsync(Notification notification, CancellationToken cancellationToken = default)
         {
             await _context.Notifications.AddAsync(notification, cancellationToken);

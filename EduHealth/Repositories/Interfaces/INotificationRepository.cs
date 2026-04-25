@@ -6,6 +6,7 @@ namespace EduHealth.Repositories.Interfaces
     {
         Task<List<Student>> GetRecipientsByClassIdAsync(int classId, CancellationToken cancellationToken = default);
         Task<List<Student>> GetRecipientsByUserIdsAsync(IReadOnlyList<int> userIds, CancellationToken cancellationToken = default);
+        Task<List<User>> GetUsersByIdsAsync(IReadOnlyList<int> userIds, CancellationToken cancellationToken = default);
 
         Task AddNotificationAsync(Notification notification, CancellationToken cancellationToken = default);
         Task AddRecipientsAsync(IReadOnlyList<NotificationRecipient> recipients, CancellationToken cancellationToken = default);

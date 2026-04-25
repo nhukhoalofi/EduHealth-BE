@@ -20,6 +20,54 @@ namespace EduHealth.DTOs.Dashboard
         public int VaccinationCampaignsActive { get; set; }
     }
 
+    public class AdminDashboardFilterDto
+    {
+        /// <summary>
+        /// Filter by class ID
+        /// </summary>
+        public int? ClassId { get; set; }
+
+        /// <summary>
+        /// Filter by date range start (UTC)
+        /// </summary>
+        public DateTime? FromDate { get; set; }
+
+        /// <summary>
+        /// Filter by date range end (UTC)
+        /// </summary>
+        public DateTime? ToDate { get; set; }
+
+        /// <summary>
+        /// Filter by disease type ID
+        /// </summary>
+        public int? DiseaseTypeId { get; set; }
+
+        /// <summary>
+        /// Filter by vaccination campaign ID
+        /// </summary>
+        public int? VaccinationCampaignId { get; set; }
+
+        /// <summary>
+        /// Filter by user status (ACTIVE, LOCKED, etc.)
+        /// </summary>
+        public string? UserStatus { get; set; }
+
+        /// <summary>
+        /// Filter by student health status (STABLE, FOLLOW_UP, HIGH_RISK)
+        /// </summary>
+        public string? HealthStatus { get; set; }
+
+        /// <summary>
+        /// Include low stock medicines in alerts
+        /// </summary>
+        public bool? IncludeLowStockMedicines { get; set; }
+
+        /// <summary>
+        /// Include expiring medicines in alerts
+        /// </summary>
+        public bool? IncludeExpiringMedicines { get; set; }
+    }
+
     public class NurseDashboardOverviewDto
     {
         public int TotalVisitsToday { get; set; }

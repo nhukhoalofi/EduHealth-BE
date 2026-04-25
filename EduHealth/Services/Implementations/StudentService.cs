@@ -61,6 +61,19 @@ namespace EduHealth.Services.Implementations
                 _studentRepository.UpdateUser(student.User);
                 await _studentRepository.SaveChangesAsync(cancellationToken);
 
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = null,
+                    Module = "STUDENTS",
+                    Action = "UPDATE_STUDENT_IMAGE",
+                    TargetType = "Student",
+                    TargetId = student.Code,
+                    TargetLabel = student.FullName,
+                    Description = "Cập nhật hình ảnh học sinh",
+                    Status = "SUCCESS",
+                    Metadata = new { }
+                }, cancellationToken);
+
                 return (true, "Cập nhật hình ảnh học sinh thành công.", null, url);
             }
             catch
@@ -297,6 +310,19 @@ namespace EduHealth.Services.Implementations
             _studentRepository.UpdateUser(student.User);
             await _studentRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "STUDENTS",
+                Action = "UPDATE_STUDENT",
+                TargetType = "Student",
+                TargetId = student.Code,
+                TargetLabel = student.FullName,
+                Description = "Cập nhật thông tin học sinh",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return new StudentOperationResultDto
             {
                 Success = true,
@@ -322,6 +348,19 @@ namespace EduHealth.Services.Implementations
 
             _studentRepository.UpdateUser(student.User);
             await _studentRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "STUDENTS",
+                Action = "DELETE_STUDENT",
+                TargetType = "Student",
+                TargetId = student.Code,
+                TargetLabel = student.FullName,
+                Description = "Xóa mềm học sinh",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return new StudentOperationResultDto
             {
@@ -444,6 +483,21 @@ namespace EduHealth.Services.Implementations
             {
                 await _studentRepository.AddRangeAsync(pendingUsers, pendingStudents, cancellationToken);
                 await _studentRepository.SaveChangesAsync(cancellationToken);
+            }
+
+            if (pendingUsers.Count > 0)
+            {
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = null,
+                    Module = "STUDENTS",
+                    Action = "IMPORT_STUDENTS",
+                    TargetType = "Student",
+                    TargetLabel = "Import Excel/CSV",
+                    Description = "Nhập học sinh từ file",
+                    Status = "SUCCESS",
+                    Metadata = new { successCount = result.SuccessCount, errorCount = result.Errors.Count, totalRows = result.TotalRows }
+                }, cancellationToken);
             }
 
             return result;

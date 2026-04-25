@@ -112,6 +112,20 @@ namespace EduHealth.Services.Implementations
             await _userRepository.SaveChangesAsync(cancellationToken);
 
             var saved = await _userRepository.GetByIdAsync(user.UserId, cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "CREATE_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = saved!.FullName,
+                Description = "Tạo tài khoản y tá mới",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return (true, 201, "Tạo tài khoản y tá thành công.", Array.Empty<(string, string, string)>(), MapDetail(saved!));
         }
 
@@ -184,6 +198,19 @@ namespace EduHealth.Services.Implementations
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "UPDATE_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Cập nhật tài khoản y tá",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var saved = await _userRepository.GetByIdAsync(user.UserId, cancellationToken);
             return (true, "Cập nhật tài khoản thành công.", Array.Empty<(string, string, string)>(), MapDetail(saved!));
@@ -309,6 +336,19 @@ namespace EduHealth.Services.Implementations
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "RESET_USER_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = $"Reset mật khẩu tài khoản ({mode.ToLower()})",
+                Status = "SUCCESS",
+                Metadata = new { mode = mode }
+            }, cancellationToken);
 
             return (true, mode == "CUSTOM" ? "Reset mật khẩu thành công." : "Reset mật khẩu tạm thành công.", Array.Empty<(string, string, string)>(), new ResetPasswordResponseDto
             {

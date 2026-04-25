@@ -145,6 +145,19 @@ namespace EduHealth.Services.Implementations
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "CREATE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = "Tạo thuốc mới",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             var detail = (await GetDetailAsync(medicine.Code, cancellationToken)).Data;
             return (true, 201, "Tạo thuốc thành công.", Array.Empty<(string, string, string)>(), detail);
         }
@@ -221,6 +234,19 @@ namespace EduHealth.Services.Implementations
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "UPDATE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = "Cập nhật thông tin thuốc",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return (true, "Cập nhật thuốc thành công.", Array.Empty<(string, string, string)>(), new
             {
                 id = medicine.Code,
@@ -258,6 +284,19 @@ namespace EduHealth.Services.Implementations
             medicine.UpdatedAt = DateTime.UtcNow;
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "UPDATE_MEDICINE_STATUS",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Cập nhật trạng thái thuốc thành {status}",
+                Status = "SUCCESS",
+                Metadata = new { status = status, reason = request.Reason?.Trim() }
+            }, cancellationToken);
 
             return (true, "Cập nhật trạng thái thuốc thành công.", Array.Empty<(string, string, string)>(), new
             {

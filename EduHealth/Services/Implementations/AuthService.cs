@@ -16,6 +16,7 @@ namespace EduHealth.Services.Implementations
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthService> _logger;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly ISystemLogWriter _logWriter;
 
         public AuthService(
             IUserRepository userRepository,
@@ -24,7 +25,8 @@ namespace EduHealth.Services.Implementations
             JwtHelper jwtHelper,
             IConfiguration configuration,
             ILogger<AuthService> logger,
-            ICloudinaryService cloudinaryService)
+            ICloudinaryService cloudinaryService,
+            ISystemLogWriter logWriter)
         {
             _userRepository = userRepository;
             _passwordResetOtpRepository = passwordResetOtpRepository;
@@ -33,6 +35,7 @@ namespace EduHealth.Services.Implementations
             _configuration = configuration;
             _logger = logger;
             _cloudinaryService = cloudinaryService;
+            _logWriter = logWriter;
         }
 
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
@@ -62,6 +65,19 @@ namespace EduHealth.Services.Implementations
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = user.UserId,
+                Module = "AUTH",
+                Action = "LOGIN",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đăng nhập tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return new LoginResponseDto
             {
@@ -262,6 +278,19 @@ namespace EduHealth.Services.Implementations
 
             await _userRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "AUTH",
+                Action = "RESET_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đặt lại mật khẩu tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return new ResetPasswordResultDto { Success = true, Message = "Đặt lại mật khẩu thành công." };
         }
 
@@ -369,6 +398,19 @@ namespace EduHealth.Services.Implementations
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = userId,
+                Module = "AUTH",
+                Action = "CHANGE_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đổi mật khẩu tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return new ChangePasswordResultDto
             {
                 Success = true,
@@ -397,6 +439,19 @@ namespace EduHealth.Services.Implementations
             user.UpdatedAt = DateTime.UtcNow;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = userId,
+                Module = "AUTH",
+                Action = "UPDATE_PROFILE",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Cập nhật hồ sơ cá nhân",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var response = new MeResponseDto
             {
@@ -445,6 +500,19 @@ namespace EduHealth.Services.Implementations
                 user.UpdatedAt = DateTime.UtcNow;
                 _userRepository.Update(user);
                 await _userRepository.SaveChangesAsync(cancellationToken);
+
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = userId,
+                    Module = "AUTH",
+                    Action = "UPDATE_AVATAR",
+                    TargetType = "User",
+                    TargetId = user.Code,
+                    TargetLabel = user.FullName,
+                    Description = "Cập nhật ảnh đại diện",
+                    Status = "SUCCESS",
+                    Metadata = new { }
+                }, cancellationToken);
 
                 return (true, "Cập nhật ảnh đại diện thành công.", string.Empty, url);
             }

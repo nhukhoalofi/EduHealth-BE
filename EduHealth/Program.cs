@@ -89,6 +89,7 @@ builder.Services.AddScoped<IVaccinationService, VaccinationService>();
 
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddSingleton<ISseNotificationService, SseNotificationService>();
 
 builder.Services.AddScoped<IMedicineRepository, MedicineRepository>();
 builder.Services.AddScoped<IMedicineService, MedicineService>();
