@@ -61,8 +61,8 @@ namespace EduHealth.Services.Implementations
 
             var (token, expiresAt) = _jwtHelper.GenerateToken(user);
 
-            user.LastLoginAt = DateTime.UtcNow;
-            user.UpdatedAt = DateTime.UtcNow;
+            user.LastLoginAt = VietnamTimeHelper.Now;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
@@ -149,7 +149,7 @@ namespace EduHealth.Services.Implementations
                 OtpExpiresAt = DateTime.UtcNow.AddMinutes(otpExpireMinutes),
                 IsVerified = false,
                 IsUsed = false,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             await _passwordResetOtpRepository.AddAsync(entity, cancellationToken);
@@ -202,7 +202,7 @@ namespace EduHealth.Services.Implementations
             var resetToken = Guid.NewGuid().ToString("N");
 
             record.IsVerified = true;
-            record.VerifiedAt = DateTime.UtcNow;
+            record.VerifiedAt = VietnamTimeHelper.Now;
             record.ResetToken = resetToken;
             record.ResetTokenExpiresAt = DateTime.UtcNow.AddMinutes(resetTokenExpireMinutes);
 
@@ -212,7 +212,7 @@ namespace EduHealth.Services.Implementations
             return new VerifyOtpResponseDto
             {
                 ResetToken = resetToken,
-                ExpiresAt = record.ResetTokenExpiresAt!.Value
+                ExpiresAt = VietnamTimeHelper.ToVietnamTime(record.ResetTokenExpiresAt!.Value)
             };
         }
 
@@ -436,7 +436,7 @@ namespace EduHealth.Services.Implementations
                 user.Phone = request.Phone.Trim();
             }
 
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
@@ -497,7 +497,7 @@ namespace EduHealth.Services.Implementations
                 var (url, publicId) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
 
                 user.Avatar = url;
-                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedAt = VietnamTimeHelper.Now;
                 _userRepository.Update(user);
                 await _userRepository.SaveChangesAsync(cancellationToken);
 

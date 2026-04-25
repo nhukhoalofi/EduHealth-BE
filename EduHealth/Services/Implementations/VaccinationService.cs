@@ -1,6 +1,7 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Vaccinations;
+using EduHealth.Helpers;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -143,7 +144,7 @@ namespace EduHealth.Services.Implementations
                 Status = "ACTIVE",
                 Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
                 CreatedByUserId = createdByUserId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             _context.VaccinationCampaigns.Add(campaign);
@@ -194,7 +195,7 @@ namespace EduHealth.Services.Implementations
             }
 
             // generate student vaccination records
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
             foreach (var uid in targetUserIds.Distinct())
             {
                 _context.StudentVaccinations.Add(new StudentVaccination
@@ -357,7 +358,7 @@ namespace EduHealth.Services.Implementations
             entity.VaccinatedAt = request.VaccinatedAt;
             entity.LotNumber = string.IsNullOrWhiteSpace(request.LotNumber) ? null : request.LotNumber.Trim();
             entity.Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
-            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedAt = VietnamTimeHelper.Now;
 
             _context.StudentVaccinations.Update(entity);
             await _context.SaveChangesAsync(cancellationToken);

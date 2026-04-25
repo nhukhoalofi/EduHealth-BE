@@ -1,5 +1,6 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
+using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -67,7 +68,7 @@ namespace EduHealth.Repositories.Implementations
 
             if (expiring == true)
             {
-                var threshold = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
+                var threshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
                 var candidates = _context.MedicineStockLogs
                     .AsNoTracking()
                     .Where(l => l.MedicineId == _context.Medicines.Select(m => m.MedicineId).FirstOrDefault() && l.ExpiryDate != null);

@@ -85,7 +85,7 @@ namespace EduHealth.Services.Implementations
                 return (false, 409, "Dữ liệu bị trùng.", duplicateErrors, null);
             }
 
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
 
             var user = new User
             {
@@ -195,7 +195,7 @@ namespace EduHealth.Services.Implementations
                 return (false, "Dữ liệu không hợp lệ.", errors, null);
             }
 
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
@@ -253,7 +253,7 @@ namespace EduHealth.Services.Implementations
             user.Status = status;
             user.LockReason = status == "LOCKED" ? request.Reason?.Trim() : null;
             user.IsActive = status == "ACTIVE";
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
 
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
@@ -333,7 +333,7 @@ namespace EduHealth.Services.Implementations
             }
 
             user.PasswordHash = PasswordHelper.HashPassword(newPassword);
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
@@ -395,7 +395,7 @@ namespace EduHealth.Services.Implementations
                 var (url, _) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
 
                 user.Avatar = url;
-                user.UpdatedAt = DateTime.UtcNow;
+                user.UpdatedAt = VietnamTimeHelper.Now;
                 _userRepository.Update(user);
                 await _userRepository.SaveChangesAsync(cancellationToken);
 

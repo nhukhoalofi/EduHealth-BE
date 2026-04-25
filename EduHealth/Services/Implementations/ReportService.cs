@@ -1,6 +1,7 @@
 ﻿using ClosedXML.Excel;
 using EduHealth.Data;
 using EduHealth.Data.Entities;
+using EduHealth.Helpers;
 using EduHealth.DTOs.Reports;
 using EduHealth.DTOs.Dashboard;
 using EduHealth.Services.Interfaces;
@@ -153,6 +154,7 @@ namespace EduHealth.Services.Implementations
             var aggregate = await BuildAggregateAsync(request.ClassId, cancellationToken);
             var summaryCards = BuildSummaryCards(aggregate);
             var format = (request.Format ?? "xlsx").Trim().ToLowerInvariant();
+            var generatedAtVietnam = VietnamTimeHelper.Now;
 
             if (format == "pdf")
             {
@@ -160,7 +162,7 @@ namespace EduHealth.Services.Implementations
 
                 return new ExportFileDto
                 {
-                    FileName = $"AdminReport_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf",
+                    FileName = $"AdminReport_{generatedAtVietnam:yyyyMMdd_HHmmss}.pdf",
                     ContentType = "application/pdf",
                     FileBytes = pdfBytes
                 };
@@ -173,8 +175,9 @@ namespace EduHealth.Services.Implementations
             summarySheet.Cell("A1").Style.Font.Bold = true;
             summarySheet.Cell("A1").Style.Font.FontSize = 16;
 
-            summarySheet.Cell("A3").Value = "GeneratedAt(UTC)";
-            summarySheet.Cell("B3").Value = DateTime.UtcNow;
+            summarySheet.Cell("A3").Value = "GeneratedAt(UTC+7)";
+            summarySheet.Cell("B3").Value = generatedAtVietnam;
+            summarySheet.Cell("B3").Style.DateFormat.Format = "dd/MM/yyyy HH:mm:ss";
 
             summarySheet.Cell("A5").Value = "Metric";
             summarySheet.Cell("B5").Value = "Value";
@@ -217,7 +220,7 @@ namespace EduHealth.Services.Implementations
 
             return new ExportFileDto
             {
-                FileName = $"AdminReport_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx",
+                FileName = $"AdminReport_{generatedAtVietnam:yyyyMMdd_HHmmss}.xlsx",
                 ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 FileBytes = stream.ToArray()
             };
@@ -254,7 +257,7 @@ namespace EduHealth.Services.Implementations
                 foreach (var id in nurseIds) recipientIds.Add(id);
             }
 
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
             var notification = new Notification
             {
                 Title = request.Title,
@@ -298,19 +301,6 @@ namespace EduHealth.Services.Implementations
                     new LogBreakdownDto { Module = "STUDENT", Action = "CREATE", Role = "NURSE", Count = (int)(total * 0.4) },
                     new LogBreakdownDto { Module = "MEDICINE", Action = "UPDATE", Role = "ADMIN", Count = (int)(total * 0.6) }
                 }
-            };
-        }
-
-        public async Task<NurseReportDashboardDto> GetNurseDashboardAsync(int nurseId, CancellationToken cancellationToken)
-        {
-            return new NurseReportDashboardDto
-            {
-                TotalAssignedStudents = 320,
-                TotalAssignedClasses = 8,
-                TodayHealthVisits = 12,
-                ExpiringMedicinesCount = await _context.Medicines.CountAsync(m => m.StockQuantity <= m.WarningThreshold, cancellationToken),
-                PendingVaccinationsCount = 8,
-                HealthSummary = new HealthSummaryDto { Healthy = 300, Sick = 15, Chronic = 5 }
             };
         }
 
@@ -373,7 +363,7 @@ namespace EduHealth.Services.Implementations
                 Content = request.Content,
                 Type = request.Type,
                 CreatedByUserId = adminId,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = VietnamTimeHelper.Now,
                 ClassId = request.ClassId
             };
 
@@ -383,7 +373,7 @@ namespace EduHealth.Services.Implementations
                 {
                     UserId = userId,
                     IsRead = false,
-                    SentAt = DateTime.UtcNow,
+                    SentAt = VietnamTimeHelper.Now,
                     Status = "SENT"
                 });
             }
@@ -396,6 +386,357 @@ namespace EduHealth.Services.Implementations
                 NotificationId = notification.NotificationId,
                 Status = "SENT",
                 RecipientCount = notification.Recipients.Count
+            };
+        }
+
+        public async Task<NurseReportDashboardDto> GetNurseDashboardAsync(int nurseId, CancellationToken cancellationToken)
+        {
+            var defaultFilter = new NurseReportFilterDto
+            {
+                TimeRange = "this-month",
+                Grade = "all",
+                ClassId = "all",
+                ReportType = "overview"
+            };
+
+            return await GetNurseDashboardAsync(nurseId, defaultFilter, cancellationToken);
+        }
+
+        public async Task<NurseReportDashboardDto> GetNurseDashboardAsync(int nurseId, NurseReportFilterDto filter, CancellationToken cancellationToken)
+        {
+            _ = nurseId; // DB không có bảng phân công nurse-class/student
+
+            var normalizedTimeRange = NormalizeTimeRange(filter.TimeRange);
+            var normalizedReportType = NormalizeReportType(filter.ReportType);
+            var normalizedGrade = string.IsNullOrWhiteSpace(filter.Grade) ? "all" : filter.Grade.Trim();
+            var classId = ParseClassId(filter.ClassId);
+
+            var (from, toExclusive) = ResolveDateRange(normalizedTimeRange, filter.FromDate, filter.ToDate);
+
+            var classOptionsQuery = _context.SchoolClasses.AsNoTracking();
+            if (!string.Equals(normalizedGrade, "all", StringComparison.OrdinalIgnoreCase))
+                classOptionsQuery = classOptionsQuery.Where(c => c.Grade == normalizedGrade);
+
+            var classOptions = await classOptionsQuery
+                .OrderBy(c => c.ClassName)
+                .Select(c => new NurseClassOptionDto
+                {
+                    Value = c.ClassId.ToString(),
+                    Label = c.ClassName
+                })
+                .ToListAsync(cancellationToken);
+
+            var classesQuery = _context.SchoolClasses.AsNoTracking();
+            if (!string.Equals(normalizedGrade, "all", StringComparison.OrdinalIgnoreCase))
+                classesQuery = classesQuery.Where(c => c.Grade == normalizedGrade);
+            if (classId.HasValue)
+                classesQuery = classesQuery.Where(c => c.ClassId == classId.Value);
+
+            var classes = await classesQuery
+                .Select(c => new { c.ClassId, c.ClassName, c.Grade })
+                .OrderBy(c => c.ClassName)
+                .ToListAsync(cancellationToken);
+
+            var response = new NurseReportDashboardDto
+            {
+                Header = new ReportHeaderDto
+                {
+                    Title = "Báo cáo y tế tổng hợp",
+                    Description = "Phân tích tình hình sức khỏe học sinh và hoạt động y tế theo lớp học."
+                },
+                AppliedFilters = new NurseAppliedFiltersDto
+                {
+                    TimeRange = normalizedTimeRange,
+                    Grade = normalizedGrade,
+                    ClassId = classId?.ToString() ?? "all",
+                    ReportType = normalizedReportType
+                },
+                FilterOptions = new NurseFilterOptionsDto
+                {
+                    ClassOptions = classOptions
+                },
+                GeneratedAt = VietnamTimeHelper.Now
+            };
+
+            if (classes.Count == 0)
+                return response;
+
+            var classIds = classes.Select(c => c.ClassId).ToHashSet();
+
+            var students = await _context.Students.AsNoTracking()
+                .Where(s => classIds.Contains(s.ClassId))
+                .Select(s => new { s.UserId, s.ClassId })
+                .ToListAsync(cancellationToken);
+
+            var studentIds = students.Select(x => x.UserId).ToHashSet();
+            var studentClassMap = students.ToDictionary(x => x.UserId, x => x.ClassId);
+
+            var visits = studentIds.Count == 0
+                ? new List<(int VisitId, int StudentUserId, DateTime VisitDate, int? DiseaseId, string? Diagnosis)>()
+                : await _context.HealthVisits.AsNoTracking()
+                    .Where(v => studentIds.Contains(v.StudentUserId) && v.VisitDate >= from && v.VisitDate < toExclusive)
+                    .Select(v => new ValueTuple<int, int, DateTime, int?, string?>(
+                        v.VisitId, v.StudentUserId, v.VisitDate, v.DiseaseId, v.Diagnosis))
+                    .ToListAsync(cancellationToken);
+
+            var visitIds = visits.Select(v => v.Item1).ToHashSet();
+
+            var prescriptions = visitIds.Count == 0
+                ? new List<(int VisitId, int MedicineId, int Quantity)>()
+                : await _context.VisitPrescriptions.AsNoTracking()
+                    .Where(p => visitIds.Contains(p.VisitId))
+                    .Select(p => new ValueTuple<int, int, int>(p.VisitId, p.MedicineId, p.Quantity))
+                    .ToListAsync(cancellationToken);
+
+            var vaccinations = studentIds.Count == 0
+                ? new List<(int UserId, string Status, DateTime UpdatedAt)>()
+                : await _context.StudentVaccinations.AsNoTracking()
+                    .Where(v => studentIds.Contains(v.UserId))
+                    .Select(v => new ValueTuple<int, string, DateTime>(v.UserId, v.Status, v.UpdatedAt))
+                    .ToListAsync(cancellationToken);
+
+            var diseaseTypes = await _context.DiseaseTypes.AsNoTracking()
+                .Select(d => new { d.DiseaseId, d.DiseaseName, d.IsContagious })
+                .ToListAsync(cancellationToken);
+
+            var diseaseNameMap = diseaseTypes.ToDictionary(x => x.DiseaseId, x => x.DiseaseName);
+            var contagiousIds = diseaseTypes.Where(x => x.IsContagious).Select(x => x.DiseaseId).ToHashSet();
+
+            var metrics = classes.ToDictionary(
+                c => c.ClassId,
+                c => new NurseClassMetricInternal(c.ClassId, c.ClassName, c.Grade));
+
+            foreach (var s in students) metrics[s.ClassId].StudentCount++;
+
+            foreach (var v in visits)
+            {
+                if (!studentClassMap.TryGetValue(v.Item2, out var cid)) continue;
+                metrics[cid].ExaminationCount++;
+                metrics[cid].TrackingStudents.Add(v.Item2);
+                if (v.Item4.HasValue && contagiousIds.Contains(v.Item4.Value)) metrics[cid].HasContagious = true;
+            }
+
+            var visitStudentMap = visits.ToDictionary(v => v.Item1, v => v.Item2);
+            foreach (var p in prescriptions)
+            {
+                if (!visitStudentMap.TryGetValue(p.Item1, out var sid)) continue;
+                if (!studentClassMap.TryGetValue(sid, out var cid)) continue;
+                metrics[cid].MedicineDispenseCount += p.Item3;
+            }
+
+            foreach (var vac in vaccinations)
+            {
+                if (!studentClassMap.TryGetValue(vac.Item1, out var cid)) continue;
+                metrics[cid].VaccinationTotal++;
+                if (string.Equals(vac.Item2, "DONE", StringComparison.OrdinalIgnoreCase))
+                    metrics[cid].VaccinationDone++;
+            }
+
+            response.ClassRows = metrics.Values
+                .OrderBy(x => x.ClassName)
+                .Select(x =>
+                {
+                    var tracking = x.TrackingStudents.Count;
+                    var rate = x.VaccinationTotal == 0 ? 0 : (int)Math.Round(x.VaccinationDone * 100.0 / x.VaccinationTotal);
+                    var status = (x.HasContagious || rate < 90) ? "alert" : (tracking > 0 ? "watch" : "safe");
+
+                    return new NurseClassRowDto
+                    {
+                        Id = x.ClassId.ToString(),
+                        ClassName = x.ClassName,
+                        Grade = x.Grade ?? "all",
+                        GradeLabel = string.IsNullOrWhiteSpace(x.Grade) ? "Chưa phân khối" : $"Khối {x.Grade}",
+                        StudentCount = x.StudentCount,
+                        ExaminationCount = x.ExaminationCount,
+                        TrackingCount = tracking,
+                        MedicineDispenseCount = x.MedicineDispenseCount,
+                        VaccinationRate = rate,
+                        Status = status
+                    };
+                })
+                .ToList();
+
+            response.Trend = BuildTrend(normalizedTimeRange, normalizedReportType, from, toExclusive, visits, prescriptions, vaccinations);
+
+            response.DiseaseBreakdown = visits
+                .GroupBy(v =>
+                {
+                    if (v.Item4.HasValue && diseaseNameMap.TryGetValue(v.Item4.Value, out var dn))
+                        return (Id: v.Item4.Value.ToString(), Label: dn);
+
+                    if (!string.IsNullOrWhiteSpace(v.Item5))
+                        return (Id: $"diag-{v.Item5.Trim().ToLowerInvariant().Replace(" ", "-")}", Label: v.Item5.Trim());
+
+                    return (Id: "other", Label: "Khác");
+                })
+                .Select(g => new NurseDiseaseBreakdownDto { Id = g.Key.Id, Label = g.Key.Label, Count = g.Count() })
+                .OrderByDescending(x => x.Count)
+                .ToList();
+
+            var medicineIds = prescriptions.Select(x => x.Item2).Distinct().ToList();
+            var medicineMap = medicineIds.Count == 0
+                ? new Dictionary<int, (string Name, string? ActiveIngredient, string Unit, string? Packaging, int Stock, int Warning)>()
+                : await _context.Medicines.AsNoTracking()
+                    .Where(m => medicineIds.Contains(m.MedicineId))
+                    .Select(m => new { m.MedicineId, m.Name, m.ActiveIngredient, m.Unit, m.Packaging, m.StockQuantity, m.WarningThreshold })
+                    .ToDictionaryAsync(
+                        x => x.MedicineId,
+                        x => (Name: x.Name, ActiveIngredient: x.ActiveIngredient, Unit: x.Unit, Packaging: x.Packaging, Stock: x.StockQuantity, Warning: x.WarningThreshold),
+                        cancellationToken);
+
+            response.TopMedicines = prescriptions
+                .GroupBy(x => x.Item2)
+                .Select(g => new { MedicineId = g.Key, UsedQuantity = g.Sum(x => x.Item3) })
+                .OrderByDescending(x => x.UsedQuantity)
+                .Take(10)
+                .Select(x =>
+                {
+                    medicineMap.TryGetValue(x.MedicineId, out var med);
+                    var category = !string.IsNullOrWhiteSpace(med.ActiveIngredient) ? med.ActiveIngredient!
+                        : !string.IsNullOrWhiteSpace(med.Unit) ? med.Unit
+                        : (med.Packaging ?? string.Empty);
+
+                    return new NurseTopMedicineDto
+                    {
+                        Id = x.MedicineId.ToString(),
+                        Name = string.IsNullOrWhiteSpace(med.Name) ? $"Medicine #{x.MedicineId}" : med.Name,
+                        Category = category,
+                        UsedQuantity = x.UsedQuantity,
+                        DeltaPercent = 0,
+                        Trend = "stable",
+                        StockStatus = med.Stock <= med.Warning ? "low" : "normal"
+                    };
+                })
+                .ToList();
+
+            response.RiskAlerts = await BuildRiskAlertsAsync(visits, vaccinations, contagiousIds, diseaseNameMap, cancellationToken);
+
+            return response;
+        }
+
+        public async Task<ExportFileDto> ExportNurseReportAsync(int nurseId, NurseReportExportRequestDto request, CancellationToken cancellationToken)
+        {
+            var dashboard = await GetNurseDashboardAsync(nurseId, new NurseReportFilterDto
+            {
+                TimeRange = request.TimeRange,
+                FromDate = request.FromDate,
+                ToDate = request.ToDate,
+                Grade = request.Grade,
+                ClassId = request.ClassId,
+                ReportType = request.ReportType
+            }, cancellationToken);
+            var generatedAtVietnam = dashboard.GeneratedAt;
+
+            var format = (request.Format ?? "xlsx").Trim().ToLowerInvariant();
+            if (format != "xlsx" && format != "pdf")
+                throw new NotSupportedException("Chỉ hỗ trợ format pdf hoặc xlsx.");
+
+            if (format == "pdf")
+            {
+                QuestPDF.Settings.License = LicenseType.Community;
+                var document = Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(PageSizes.A4);
+                        page.Margin(24);
+                        page.DefaultTextStyle(x => x.FontSize(11).FontFamily("Arial"));
+
+                        page.Header().Column(col =>
+                        {
+                            col.Item().Text("Báo cáo y tế tổng hợp").Bold().FontSize(16);
+                            col.Item().Text($"Thời gian xuất: {generatedAtVietnam:dd/MM/yyyy HH:mm:ss}");
+                        });
+
+                        page.Content().Column(col =>
+                        {
+                            col.Spacing(8);
+                            col.Item().Text($"Bộ lọc: {dashboard.AppliedFilters.TimeRange} / {dashboard.AppliedFilters.ReportType}");
+                            col.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(c =>
+                                {
+                                    c.RelativeColumn(1);
+                                    c.RelativeColumn(2);
+                                    c.RelativeColumn(1);
+                                    c.RelativeColumn(1);
+                                    c.RelativeColumn(1);
+                                    c.RelativeColumn(1.5f);
+                                });
+
+                                table.Header(h =>
+                                {
+                                    h.Cell().Text("ID").Bold();
+                                    h.Cell().Text("Lớp").Bold();
+                                    h.Cell().Text("Sĩ số").Bold();
+                                    h.Cell().Text("Khám").Bold();
+                                    h.Cell().Text("Theo dõi").Bold();
+                                    h.Cell().Text("Tỷ lệ tiêm").Bold();
+                                });
+
+                                foreach (var row in dashboard.ClassRows)
+                                {
+                                    table.Cell().Text(row.Id);
+                                    table.Cell().Text(row.ClassName);
+                                    table.Cell().Text(row.StudentCount.ToString());
+                                    table.Cell().Text(row.ExaminationCount.ToString());
+                                    table.Cell().Text(row.TrackingCount.ToString());
+                                    table.Cell().Text($"{row.VaccinationRate}%");
+                                }
+                            });
+                        });
+                    });
+                });
+
+                return new ExportFileDto
+                {
+                    FileName = $"NurseReport_{generatedAtVietnam:yyyyMMdd_HHmmss}.pdf",
+                    ContentType = "application/pdf",
+                    FileBytes = document.GeneratePdf()
+                };
+            }
+
+            using var workbook = new XLWorkbook();
+            var summary = workbook.Worksheets.Add("Summary");
+            summary.Cell("A1").Value = "EduHealth Nurse Report";
+            summary.Cell("A1").Style.Font.Bold = true;
+            summary.Cell("A1").Style.Font.FontSize = 16;
+            summary.Cell("A3").Value = "GeneratedAt(UTC+7)";
+            summary.Cell("B3").Value = generatedAtVietnam;
+            summary.Cell("B3").Style.DateFormat.Format = "dd/MM/yyyy HH:mm:ss";
+
+            var classes = workbook.Worksheets.Add("Classes");
+            classes.Cell("A1").Value = "ClassId";
+            classes.Cell("B1").Value = "ClassName";
+            classes.Cell("C1").Value = "StudentCount";
+            classes.Cell("D1").Value = "ExaminationCount";
+            classes.Cell("E1").Value = "TrackingCount";
+            classes.Cell("F1").Value = "MedicineDispenseCount";
+            classes.Cell("G1").Value = "VaccinationRate";
+            classes.Range("A1:G1").Style.Font.Bold = true;
+
+            for (var i = 0; i < dashboard.ClassRows.Count; i++)
+            {
+                var r = i + 2;
+                var row = dashboard.ClassRows[i];
+                classes.Cell($"A{r}").Value = row.Id;
+                classes.Cell($"B{r}").Value = row.ClassName;
+                classes.Cell($"C{r}").Value = row.StudentCount;
+                classes.Cell($"D{r}").Value = row.ExaminationCount;
+                classes.Cell($"E{r}").Value = row.TrackingCount;
+                classes.Cell($"F{r}").Value = row.MedicineDispenseCount;
+                classes.Cell($"G{r}").Value = row.VaccinationRate;
+            }
+            classes.Columns("A:G").AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+
+            return new ExportFileDto
+            {
+                FileName = $"NurseReport_{generatedAtVietnam:yyyyMMdd_HHmmss}.xlsx",
+                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                FileBytes = stream.ToArray()
             };
         }
 
@@ -704,6 +1045,7 @@ namespace EduHealth.Services.Implementations
         {
             QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
             var classRows = aggregate.ClassRows.Select(ToClassRow).ToList();
+            var generatedAtVietnam = VietnamTimeHelper.Now;
 
             var document = Document.Create(container =>
             {
@@ -717,7 +1059,7 @@ namespace EduHealth.Services.Implementations
                     {
                         col.Spacing(4);
                         col.Item().Text("Báo cáo quản trị y tế học đường").Bold().FontSize(16);
-                        col.Item().Text($"Thời gian xuất: {DateTime.Now:dd/MM/yyyy HH:mm:ss}");
+                        col.Item().Text($"Thời gian xuất: {generatedAtVietnam:dd/MM/yyyy HH:mm:ss}");
                     });
 
                     page.Content().Column(col =>
@@ -779,6 +1121,197 @@ namespace EduHealth.Services.Implementations
             return document.GeneratePdf();
         }
 
+        private static string NormalizeTimeRange(string? value)
+        {
+            var v = (value ?? "this-month").Trim().ToLowerInvariant();
+            return v is "this-week" or "this-month" or "this-quarter" or "custom-range" ? v : "this-month";
+        }
+
+        private static string NormalizeReportType(string? value)
+        {
+            var v = (value ?? "overview").Trim().ToLowerInvariant();
+            return v is "overview" or "health" or "vaccination" or "medicine" ? v : "overview";
+        }
+
+        private static int? ParseClassId(string? classIdRaw)
+        {
+            var raw = string.IsNullOrWhiteSpace(classIdRaw) ? "all" : classIdRaw.Trim();
+            if (string.Equals(raw, "all", StringComparison.OrdinalIgnoreCase)) return null;
+            if (int.TryParse(raw, out var parsed) && parsed > 0) return parsed;
+            throw new ArgumentException("classId phải là số nguyên dương hoặc 'all'.");
+        }
+
+        private static (DateTime From, DateTime ToExclusive) ResolveDateRange(string timeRange, DateTime? fromDate, DateTime? toDate)
+        {
+            var now = VietnamTimeHelper.Now;
+
+            if (timeRange == "custom-range")
+            {
+                if (!fromDate.HasValue || !toDate.HasValue)
+                    throw new ArgumentException("fromDate và toDate là bắt buộc khi timeRange=custom-range.");
+
+                var from = fromDate.Value.Date;
+                var to = toDate.Value.Date;
+                if (to < from) throw new ArgumentException("toDate phải >= fromDate.");
+                return (from, to.AddDays(1));
+            }
+
+            if (timeRange == "this-week")
+            {
+                var diff = ((int)now.DayOfWeek + 6) % 7;
+                var start = now.Date.AddDays(-diff);
+                return (start, start.AddDays(7));
+            }
+
+            if (timeRange == "this-quarter")
+            {
+                var q = (now.Month - 1) / 3;
+                var start = new DateTime(now.Year, q * 3 + 1, 1);
+                return (start, start.AddMonths(3));
+            }
+
+            var monthStart = new DateTime(now.Year, now.Month, 1);
+            return (monthStart, monthStart.AddMonths(1));
+        }
+
+        private static List<NurseTrendDto> BuildTrend(
+            string timeRange,
+            string reportType,
+            DateTime from,
+            DateTime toExclusive,
+            List<(int VisitId, int StudentUserId, DateTime VisitDate, int? DiseaseId, string? Diagnosis)> visits,
+            List<(int VisitId, int MedicineId, int Quantity)> prescriptions,
+            List<(int UserId, string Status, DateTime UpdatedAt)> vaccinations)
+        {
+            IEnumerable<(DateTime Date, int Value)> source;
+
+            if (reportType is "overview" or "health")
+            {
+                source = visits.Select(v => (v.VisitDate, 1));
+            }
+            else if (reportType == "medicine")
+            {
+                var visitDateMap = visits.ToDictionary(v => v.VisitId, v => v.VisitDate);
+                source = prescriptions
+                    .Where(p => visitDateMap.ContainsKey(p.VisitId))
+                    .Select(p => (visitDateMap[p.VisitId], p.Quantity));
+            }
+            else
+            {
+                source = vaccinations
+                    .Where(v => v.UpdatedAt >= from && v.UpdatedAt < toExclusive)
+                    .Select(v => (v.UpdatedAt, 1));
+            }
+
+            return source
+                .GroupBy(x => GetBucketStart(x.Date, timeRange))
+                .OrderBy(g => g.Key)
+                .Select(g => new NurseTrendDto
+                {
+                    Label = GetBucketLabel(g.Key, timeRange),
+                    Value = g.Sum(x => x.Value)
+                })
+                .ToList();
+        }
+
+        private static DateTime GetBucketStart(DateTime date, string timeRange)
+        {
+            var d = date.Date;
+            return timeRange switch
+            {
+                "this-month" => new DateTime(d.Year, d.Month, 1).AddDays(((d.Day - 1) / 7) * 7),
+                "this-quarter" => new DateTime(d.Year, d.Month, 1),
+                _ => d
+            };
+        }
+
+        private static string GetBucketLabel(DateTime bucket, string timeRange)
+        {
+            return timeRange switch
+            {
+                "this-month" => $"Tuần {(((bucket.Day - 1) / 7) + 1):00}",
+                "this-quarter" => $"Tháng {bucket.Month:00}",
+                _ => bucket.ToString("dd/MM")
+            };
+        }
+
+        private async Task<List<NurseRiskAlertDto>> BuildRiskAlertsAsync(
+            List<(int VisitId, int StudentUserId, DateTime VisitDate, int? DiseaseId, string? Diagnosis)> visits,
+            List<(int UserId, string Status, DateTime UpdatedAt)> vaccinations,
+            HashSet<int> contagiousIds,
+            Dictionary<int, string> diseaseNameMap,
+            CancellationToken cancellationToken)
+        {
+            var alerts = new List<NurseRiskAlertDto>();
+
+            alerts.AddRange(
+                visits.Where(v => v.DiseaseId.HasValue && contagiousIds.Contains(v.DiseaseId.Value))
+                    .GroupBy(v => v.DiseaseId!.Value)
+                    .Select(g => new NurseRiskAlertDto
+                    {
+                        Id = $"contagious-{g.Key}",
+                        Tone = "danger",
+                        Title = $"Bệnh truyền nhiễm: {(diseaseNameMap.TryGetValue(g.Key, out var n) ? n : $"Disease #{g.Key}")}",
+                        Message = $"Ghi nhận {g.Count()} lượt khám.",
+                        TimeLabel = g.Max(x => x.VisitDate).ToString("dd/MM/yyyy HH:mm")
+                    }));
+
+            alerts.AddRange(await _context.Medicines.AsNoTracking()
+                .Where(m => m.StockQuantity <= m.WarningThreshold)
+                .OrderBy(m => m.StockQuantity)
+                .Take(10)
+                .Select(m => new NurseRiskAlertDto
+                {
+                    Id = $"low-stock-{m.MedicineId}",
+                    Tone = "warning",
+                    Title = $"Thuốc tồn thấp: {m.Name}",
+                    Message = $"Tồn kho {m.StockQuantity}, ngưỡng {m.WarningThreshold}.",
+                    TimeLabel = VietnamTimeHelper.Now.ToString("dd/MM/yyyy HH:mm")
+                })
+                .ToListAsync(cancellationToken));
+
+            var today = VietnamTimeHelper.TodayDateOnly;
+            var near = today.AddDays(30);
+
+            var expiring = await _context.MedicineStockLogs.AsNoTracking()
+                .Where(l => l.ExpiryDate.HasValue && l.ExpiryDate.Value >= today && l.ExpiryDate.Value <= near)
+                .GroupBy(l => l.MedicineId)
+                .Select(g => new { MedicineId = g.Key, ExpiryDate = g.Min(x => x.ExpiryDate) })
+                .ToListAsync(cancellationToken);
+
+            if (expiring.Count > 0)
+            {
+                var ids = expiring.Select(x => x.MedicineId).ToList();
+                var names = await _context.Medicines.AsNoTracking()
+                    .Where(m => ids.Contains(m.MedicineId))
+                    .ToDictionaryAsync(m => m.MedicineId, m => m.Name, cancellationToken);
+
+                alerts.AddRange(expiring.Select(x => new NurseRiskAlertDto
+                {
+                    Id = $"expiry-{x.MedicineId}",
+                    Tone = "warning",
+                    Title = $"Lô thuốc sắp hết hạn: {(names.TryGetValue(x.MedicineId, out var n) ? n : $"Medicine #{x.MedicineId}")}",
+                    Message = $"Ngày hết hạn gần nhất: {x.ExpiryDate:dd/MM/yyyy}.",
+                    TimeLabel = VietnamTimeHelper.Now.ToString("dd/MM/yyyy HH:mm")
+                }));
+            }
+
+            var pending = vaccinations.Count(v => !string.Equals(v.Status, "DONE", StringComparison.OrdinalIgnoreCase));
+            if (pending > 0)
+            {
+                alerts.Add(new NurseRiskAlertDto
+                {
+                    Id = "vaccination-pending",
+                    Tone = "info",
+                    Title = "Tiêm chủng chưa hoàn tất",
+                    Message = $"Có {pending} bản ghi chưa đạt DONE.",
+                    TimeLabel = VietnamTimeHelper.Now.ToString("dd/MM/yyyy HH:mm")
+                });
+            }
+
+            return alerts;
+        }
+
         private sealed class ReportAggregate
         {
             public List<ClassMetric> ClassRows { get; set; } = new();
@@ -819,6 +1352,27 @@ namespace EduHealth.Services.Implementations
             public int VaccinationCompleted { get; set; }
             public DateTime? LastVisitAt { get; set; }
             public Dictionary<string, int> ContagiousDiseases { get; } = new();
+        }
+
+        private sealed class NurseClassMetricInternal
+        {
+            public NurseClassMetricInternal(int classId, string className, string? grade)
+            {
+                ClassId = classId;
+                ClassName = className;
+                Grade = grade;
+            }
+
+            public int ClassId { get; }
+            public string ClassName { get; }
+            public string? Grade { get; }
+            public int StudentCount { get; set; }
+            public int ExaminationCount { get; set; }
+            public int MedicineDispenseCount { get; set; }
+            public int VaccinationTotal { get; set; }
+            public int VaccinationDone { get; set; }
+            public bool HasContagious { get; set; }
+            public HashSet<int> TrackingStudents { get; } = new();
         }
     }
 }

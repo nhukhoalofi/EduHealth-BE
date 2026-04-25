@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using EduHealth.Helpers;
 using EduHealth.Services.Interfaces;
 
 namespace EduHealth.Services.Implementations
@@ -52,7 +53,7 @@ namespace EduHealth.Services.Implementations
             var @event = new SseEventDto
             {
                 EventType = "NOTIFICATION_CREATED",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = VietnamTimeHelper.Now,
                 Data = new { notificationId, recipientCount = recipientUserIds.Length }
             };
 
@@ -64,7 +65,7 @@ namespace EduHealth.Services.Implementations
             var @event = new SseEventDto
             {
                 EventType = "NOTIFICATION_READ",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = VietnamTimeHelper.Now,
                 Data = new { notificationId, userId }
             };
 
@@ -76,7 +77,7 @@ namespace EduHealth.Services.Implementations
             var @event = new SseEventDto
             {
                 EventType = "ALL_NOTIFICATIONS_READ",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = VietnamTimeHelper.Now,
                 Data = new { userId }
             };
 
@@ -88,7 +89,7 @@ namespace EduHealth.Services.Implementations
             var @event = new SseEventDto
             {
                 EventType = "UNREAD_COUNT_CHANGED",
-                Timestamp = DateTime.UtcNow,
+                Timestamp = VietnamTimeHelper.Now,
                 Data = new { userId, unreadCount }
             };
 
@@ -100,7 +101,7 @@ namespace EduHealth.Services.Implementations
             await _connectionLock.WaitAsync(cancellationToken);
             try
             {
-                var connection = new ClientConnection(userId, writer, cancellationToken, DateTime.UtcNow);
+                var connection = new ClientConnection(userId, writer, cancellationToken, VietnamTimeHelper.Now);
                 _activeConnections.AddOrUpdate(userId, connection, (_, _) => connection);
             }
             finally

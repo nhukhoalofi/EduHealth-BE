@@ -181,31 +181,103 @@ namespace EduHealth.Controllers
 
         [HttpGet("nurse/dashboard")]
         [Authorize(Roles = "NURSE")]
-        public async Task<IActionResult> GetNurseDashboard(CancellationToken cancellationToken)
+        public async Task<IActionResult> GetNurseDashboard(
+            [FromQuery] string? timeRange,
+            [FromQuery] DateTime? fromDate,
+            [FromQuery] DateTime? toDate,
+            [FromQuery] string? grade,
+            [FromQuery] string? classId,
+            [FromQuery] string? reportType,
+            CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
             _ = int.TryParse(userIdClaim, out var nurseId);
-            var data = await _reportService.GetNurseDashboardAsync(nurseId, cancellationToken);
-            return Ok(new ApiResponseV2<NurseReportDashboardDto> { Success = true, Message = "Lấy dữ liệu dashboard Y tá thành công", Data = data, Timestamp = DateTime.UtcNow });
-        }
 
-        [HttpGet("nurse/classes/{classId}")]
-        [Authorize(Roles = "NURSE")]
-        public async Task<IActionResult> GetNurseClassReport([FromRoute] int classId, CancellationToken cancellationToken)
-        {
-            var data = await _reportService.GetClassReportAsync(classId, cancellationToken);
-            if (data == null)
-                return NotFound(new ApiErrorResponseV2 { Success = false, Message = "Không tìm thấy lớp học.", Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier });
+            var filter = new NurseReportFilterDto
+            {
+                TimeRange = string.IsNullOrWhiteSpace(timeRange) ? "this-month" : timeRange.Trim(),
+                FromDate = fromDate,
+                ToDate = toDate,
+                Grade = string.IsNullOrWhiteSpace(grade) ? "all" : grade.Trim(),
+                ClassId = string.IsNullOrWhiteSpace(classId) ? "all" : classId.Trim(),
+                ReportType = string.IsNullOrWhiteSpace(reportType) ? "overview" : reportType.Trim()
+            };
 
-            return Ok(new ApiResponseV2<ReportClassDto> { Success = true, Message = "Lấy dữ liệu báo cáo lớp thành công", Data = data, Timestamp = DateTime.UtcNow });
+            try
+            {
+                var data = await _reportService.GetNurseDashboardAsync(nurseId, filter, cancellationToken);
+                return Ok(new ApiResponseV2<NurseReportDashboardDto>
+                {
+                    Success = true,
+                    Message = "Lấy dữ liệu dashboard Y tá thành công",
+                    Data = data,
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ApiErrorResponseV2
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
         }
 
         [HttpGet("nurse/export")]
         [Authorize(Roles = "NURSE")]
-        public async Task<IActionResult> ExportNurseReport([FromQuery] ExportRequestDto request, CancellationToken cancellationToken)
+        public async Task<IActionResult> ExportNurseReport(
+            [FromQuery] string? format,
+            [FromQuery] DateTime? fromDate,
+            [FromQuery] DateTime? toDate,
+            [FromQuery] string? classId,
+            [FromQuery] string? grade,
+            [FromQuery] string? reportType,
+            [FromQuery] string? timeRange,
+            CancellationToken cancellationToken)
         {
-            var file = await _reportService.ExportReportXlsxAsync(request, cancellationToken);
-            return File(file.FileBytes, file.ContentType, file.FileName);
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _ = int.TryParse(userIdClaim, out var nurseId);
+
+            var request = new NurseReportExportRequestDto
+            {
+                Format = string.IsNullOrWhiteSpace(format) ? "xlsx" : format.Trim(),
+                FromDate = fromDate,
+                ToDate = toDate,
+                ClassId = string.IsNullOrWhiteSpace(classId) ? "all" : classId.Trim(),
+                Grade = string.IsNullOrWhiteSpace(grade) ? "all" : grade.Trim(),
+                ReportType = string.IsNullOrWhiteSpace(reportType) ? "overview" : reportType.Trim(),
+                TimeRange = string.IsNullOrWhiteSpace(timeRange) ? "this-month" : timeRange.Trim()
+            };
+
+            try
+            {
+                var file = await _reportService.ExportNurseReportAsync(nurseId, request, cancellationToken);
+                return File(file.FileBytes, file.ContentType, file.FileName);
+            }
+            catch (NotSupportedException ex)
+            {
+                return StatusCode(StatusCodes.Status501NotImplemented, new ApiErrorResponseV2
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ApiErrorResponseV2
+                {
+                    Success = false,
+                    Message = ex.Message,
+                    Timestamp = DateTime.UtcNow,
+                    TraceId = HttpContext.TraceIdentifier
+                });
+            }
         }
     }
 }

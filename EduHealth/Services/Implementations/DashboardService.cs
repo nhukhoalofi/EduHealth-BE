@@ -1,5 +1,6 @@
 ﻿using EduHealth.Data;
 using EduHealth.DTOs.Dashboard;
+using EduHealth.Helpers;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -16,7 +17,7 @@ namespace EduHealth.Services.Implementations
 
         public async Task<AdminDashboardOverviewDto> GetAdminOverviewAsync()
         {
-            var today = DateTime.UtcNow.Date;
+            var today = VietnamTimeHelper.Now.Date;
             var startOfMonth = new DateTime(today.Year, today.Month, 1);
 
             return new AdminDashboardOverviewDto
@@ -36,7 +37,7 @@ namespace EduHealth.Services.Implementations
 
         public async Task<NurseDashboardOverviewDto> GetNurseOverviewAsync()
         {
-            var today = DateTime.UtcNow.Date;
+            var today = VietnamTimeHelper.Now.Date;
             var todayDateOnly = DateOnly.FromDateTime(today);
             var thirtyDaysFromNow = todayDateOnly.AddDays(30);
 
@@ -114,7 +115,8 @@ namespace EduHealth.Services.Implementations
 
         public async Task<IReadOnlyList<TopDiseaseDto>> GetTopDiseasesAsync(int top = 5, CancellationToken cancellationToken = default)
         {
-            var startOfMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+            var now = VietnamTimeHelper.Now;
+            var startOfMonth = new DateTime(now.Year, now.Month, 1);
 
             // Tách query để EF Core có thể thực thi chính xác.
             // Bước 1: Group by DiseaseId và đếm
