@@ -13,11 +13,9 @@ namespace EduHealth.Services.Interfaces
         Task<DirectiveResponseDto> CreateDirectiveAsync(DirectiveRequestDto request, int adminUserId, CancellationToken cancellationToken);
         Task<SystemLogSummaryDto> GetSystemLogSummaryAsync(CancellationToken cancellationToken);
 
-        Task<NurseReportDashboardDto> GetNurseDashboardAsync(string timeRange, DateTime? fromDate, DateTime? toDate, string? grade, string? classId, string? reportType, CancellationToken cancellationToken = default);
-        Task<NurseClassDetailReportDto?> GetNurseClassDetailAsync(int classId, string timeRange, DateTime? fromDate, DateTime? toDate, CancellationToken cancellationToken = default);
-        Task<ExportFileDto> ExportNurseReportAsync(string format, string timeRange, DateTime? fromDate, DateTime? toDate, string? grade, string? classId, string? reportType, CancellationToken cancellationToken = default);
+        Task<NurseReportDashboardDto> GetNurseDashboardAsync(int nurseId, CancellationToken cancellationToken);
 
-        Task<AdminNotificationPreviewResponseDto> PreviewNotificationsAsync(AdminNotificationPreviewRequestDto request, CancellationToken cancellationToken = default);
-        Task<AdminNotificationResponseDto> SendNotificationsAsync(AdminNotificationRequestDto request, int adminId, CancellationToken cancellationToken = default);
+        Task<AdminNotificationPreviewResponseDto> PreviewNotificationsAsync(AdminNotificationPreviewRequestDto request, CancellationToken cancellationToken);
+        Task<AdminNotificationResponseDto> SendNotificationsAsync(AdminNotificationRequestDto request, int adminId, CancellationToken cancellationToken);
     }
 }

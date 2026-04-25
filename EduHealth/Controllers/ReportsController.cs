@@ -181,33 +181,23 @@ namespace EduHealth.Controllers
 
         [HttpGet("nurse/dashboard")]
         [Authorize(Roles = "NURSE")]
-        public async Task<IActionResult> GetNurseDashboard(
-            [FromQuery] string timeRange = "this-month",
-            [FromQuery] DateTime? fromDate = null,
-            [FromQuery] DateTime? toDate = null,
-            [FromQuery] string? grade = null,
-            [FromQuery] string? classId = null,
-            [FromQuery] string? reportType = null,
-            CancellationToken cancellationToken = default)
+        public async Task<IActionResult> GetNurseDashboard(CancellationToken cancellationToken)
         {
-            var data = await _reportService.GetNurseDashboardAsync(timeRange, fromDate, toDate, grade, classId, reportType, cancellationToken);
-            return Ok(new ApiResponseV2<NurseDashboardReportDto> { Success = true, Message = "Lấy dữ liệu dashboard Y tá thành công", Data = data, Timestamp = DateTime.UtcNow });
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _ = int.TryParse(userIdClaim, out var nurseId);
+            var data = await _reportService.GetNurseDashboardAsync(nurseId, cancellationToken);
+            return Ok(new ApiResponseV2<NurseReportDashboardDto> { Success = true, Message = "Lấy dữ liệu dashboard Y tá thành công", Data = data, Timestamp = DateTime.UtcNow });
         }
 
         [HttpGet("nurse/classes/{classId}")]
         [Authorize(Roles = "NURSE")]
-        public async Task<IActionResult> GetNurseClassReport(
-            [FromRoute] int classId,
-            [FromQuery] string timeRange = "this-month",
-            [FromQuery] DateTime? fromDate = null,
-            [FromQuery] DateTime? toDate = null,
-            CancellationToken cancellationToken = default)
+        public async Task<IActionResult> GetNurseClassReport([FromRoute] int classId, CancellationToken cancellationToken)
         {
-            var data = await _reportService.GetNurseClassDetailAsync(classId, timeRange, fromDate, toDate, cancellationToken);
+            var data = await _reportService.GetClassReportAsync(classId, cancellationToken);
             if (data == null)
                 return NotFound(new ApiErrorResponseV2 { Success = false, Message = "Không tìm thấy lớp học.", Timestamp = DateTime.UtcNow, TraceId = HttpContext.TraceIdentifier });
 
-            return Ok(new ApiResponseV2<NurseClassDetailReportDto> { Success = true, Message = "Lấy dữ liệu báo cáo lớp thành công", Data = data, Timestamp = DateTime.UtcNow });
+            return Ok(new ApiResponseV2<ReportClassDto> { Success = true, Message = "Lấy dữ liệu báo cáo lớp thành công", Data = data, Timestamp = DateTime.UtcNow });
         }
 
         [HttpGet("nurse/export")]
