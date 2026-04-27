@@ -57,7 +57,7 @@ namespace EduHealth.Services.Implementations
                 var (url, publicId) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
 
                 student.User.Avatar = url;
-                student.User.UpdatedAt = DateTime.UtcNow;
+                student.User.UpdatedAt = VietnamTimeHelper.Now;
                 _studentRepository.UpdateUser(student.User);
                 await _studentRepository.SaveChangesAsync(cancellationToken);
 
@@ -153,7 +153,7 @@ namespace EduHealth.Services.Implementations
 
             var password = string.IsNullOrWhiteSpace(request.Password) ? "123456Aa@" : request.Password.Trim();
 
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
             var nextUserSeq = await _studentRepository.GetNextUserCodeSequenceAsync(cancellationToken);
             var nextStudentSeq = await _studentRepository.GetNextStudentCodeSequenceAsync(cancellationToken);
             var userCode = $"USR{nextUserSeq:D3}";
@@ -193,7 +193,6 @@ namespace EduHealth.Services.Implementations
 
             await _studentRepository.AddAsync(user, student, cancellationToken);
             await _studentRepository.SaveChangesAsync(cancellationToken);
-
             var saved = await _studentRepository.GetByUserIdAsync(user.UserId, cancellationToken);
 
             await _logWriter.WriteAsync(new SystemLogWriteRequest

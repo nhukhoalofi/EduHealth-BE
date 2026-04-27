@@ -1,6 +1,7 @@
 using System.Text.Json;
 using EduHealth.Data;
 using EduHealth.Data.Entities;
+using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -49,7 +50,7 @@ namespace EduHealth.Services.Implementations
 
             var log = new SystemLog
             {
-                CreatedAt = request.CreatedAt ?? DateTime.UtcNow,
+                CreatedAt = request.CreatedAt ?? VietnamTimeHelper.Now,
                 ActorUserId = request.ActorUserId,
                 ActorName = actorName,
                 ActorUsername = actorUsername,

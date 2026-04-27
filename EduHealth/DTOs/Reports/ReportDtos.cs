@@ -144,12 +144,101 @@ namespace EduHealth.DTOs.Reports
 
     public class NurseReportDashboardDto
     {
-        public int TotalAssignedStudents { get; set; }
-        public int TotalAssignedClasses { get; set; }
-        public int TodayHealthVisits { get; set; }
-        public int ExpiringMedicinesCount { get; set; }
-        public int PendingVaccinationsCount { get; set; }
-        public HealthSummaryDto HealthSummary { get; set; } = new();
+        public ReportHeaderDto Header { get; set; } = new()
+        {
+            Title = "Báo cáo y tế tổng hợp",
+            Description = "Phân tích tình hình sức khỏe học sinh và hoạt động y tế theo lớp học."
+        };
+
+        public NurseAppliedFiltersDto AppliedFilters { get; set; } = new();
+        public NurseFilterOptionsDto FilterOptions { get; set; } = new();
+        public List<NurseTrendDto> Trend { get; set; } = new();
+        public List<NurseDiseaseBreakdownDto> DiseaseBreakdown { get; set; } = new();
+        public List<NurseTopMedicineDto> TopMedicines { get; set; } = new();
+        public List<NurseRiskAlertDto> RiskAlerts { get; set; } = new();
+        public List<NurseClassRowDto> ClassRows { get; set; } = new();
+        public DateTime GeneratedAt { get; set; }
+    }
+
+    public class NurseAppliedFiltersDto
+    {
+        public string TimeRange { get; set; } = "this-month";
+        public string Grade { get; set; } = "all";
+        public string ClassId { get; set; } = "all";
+        public string ReportType { get; set; } = "overview";
+    }
+
+    public class NurseFilterOptionsDto
+    {
+        public List<NurseClassOptionDto> ClassOptions { get; set; } = new();
+    }
+
+    public class NurseClassOptionDto
+    {
+        public string Value { get; set; } = null!;
+        public string Label { get; set; } = null!;
+    }
+
+    public class NurseTrendDto
+    {
+        public string Label { get; set; } = null!;
+        public int Value { get; set; }
+    }
+
+    public class NurseDiseaseBreakdownDto
+    {
+        public string Id { get; set; } = null!;
+        public string Label { get; set; } = null!;
+        public int Count { get; set; }
+    }
+
+    public class NurseTopMedicineDto
+    {
+        public string Id { get; set; } = null!;
+        public string Name { get; set; } = null!;
+        public string Category { get; set; } = string.Empty;
+        public int UsedQuantity { get; set; }
+        public int DeltaPercent { get; set; } = 0;
+        public string Trend { get; set; } = "stable";
+        public string StockStatus { get; set; } = "normal"; // low | normal
+    }
+
+    public class NurseRiskAlertDto
+    {
+        public string Id { get; set; } = null!;
+        public string Tone { get; set; } = null!;
+        public string Title { get; set; } = null!;
+        public string Message { get; set; } = null!;
+        public string TimeLabel { get; set; } = null!;
+    }
+
+    public class NurseClassRowDto
+    {
+        public string Id { get; set; } = null!;
+        public string ClassName { get; set; } = null!;
+        public string Grade { get; set; } = "all";
+        public string GradeLabel { get; set; } = null!;
+        public int StudentCount { get; set; }
+        public int ExaminationCount { get; set; }
+        public int TrackingCount { get; set; }
+        public int MedicineDispenseCount { get; set; }
+        public int VaccinationRate { get; set; }
+        public string Status { get; set; } = "safe"; // alert | watch | safe
+    }
+
+    public class NurseReportFilterDto
+    {
+        public string TimeRange { get; set; } = "this-month";
+        public DateTime? FromDate { get; set; }
+        public DateTime? ToDate { get; set; }
+        public string Grade { get; set; } = "all";
+        public string ClassId { get; set; } = "all";
+        public string ReportType { get; set; } = "overview";
+    }
+
+    public class NurseReportExportRequestDto : NurseReportFilterDto
+    {
+        public string Format { get; set; } = "xlsx";
     }
 
     public class HealthSummaryDto

@@ -2,6 +2,7 @@ using EduHealth.Data.Entities;
 using EduHealth.DTOs.Notifications;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
+using EduHealth.Helpers;
 
 namespace EduHealth.Services.Implementations
 {
@@ -63,7 +64,7 @@ namespace EduHealth.Services.Implementations
                 Content = request.Content.Trim(),
                 Type = request.Type.Trim(),
                 CreatedByUserId = createdByUserId,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = VietnamTimeHelper.Now,
                 ClassId = request.ClassId,
                 DiseaseId = request.DiseaseId,
                 VaccinationId = request.VaccinationId
@@ -79,7 +80,7 @@ namespace EduHealth.Services.Implementations
                     UserId = x.UserId,
                     IsRead = false,
                     ReadAt = null,
-                    SentAt = DateTime.UtcNow,
+                    SentAt = VietnamTimeHelper.Now,
                     Status = "SENT"
                 })
                 .ToList();
@@ -123,7 +124,7 @@ namespace EduHealth.Services.Implementations
             if (!recipient.IsRead)
             {
                 recipient.IsRead = true;
-                recipient.ReadAt = DateTime.UtcNow;
+                recipient.ReadAt = VietnamTimeHelper.Now;
                 await _notificationRepository.SaveChangesAsync(cancellationToken);
 
                 // Broadcast SSE event

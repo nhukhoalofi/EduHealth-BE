@@ -29,7 +29,7 @@ namespace EduHealth.Helpers
             var expireMinutesText = _configuration["Jwt:ExpireMinutes"] ?? "120";
             var expireMinutes = int.Parse(expireMinutesText);
 
-            var expiresAt = DateTime.UtcNow.AddMinutes(expireMinutes);
+            var expiresAtUtc = DateTime.UtcNow.AddMinutes(expireMinutes);
 
             var claims = new List<Claim>
             {
@@ -47,13 +47,13 @@ namespace EduHealth.Helpers
                 issuer: issuer,
                 audience: audience,
                 claims: claims,
-                expires: expiresAt,
+                expires: expiresAtUtc,
                 signingCredentials: credentials
             );
 
             var token = new JwtSecurityTokenHandler().WriteToken(tokenDescriptor);
 
-            return (token, expiresAt);
+            return (token, VietnamTimeHelper.ToVietnamTime(expiresAtUtc));
         }
     }
 }

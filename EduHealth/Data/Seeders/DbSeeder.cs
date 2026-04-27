@@ -131,6 +131,10 @@ namespace EduHealth.Data.Seeders
 
         private static async Task SeedManyStudentsAsync(AppDbContext context)
         {
+            if (await context.Students.AnyAsync())
+            {
+                return;
+            }
             // Create 300 students/users: 5 grades * 2 classes/grade * 30 students/class
             if (await context.Students.AnyAsync())
             {
@@ -283,8 +287,8 @@ namespace EduHealth.Data.Seeders
                 var dayOfYear = random.Next(1, 365);
                 var dob = new DateTime(birthYear, 1, 1).AddDays(dayOfYear - 1);
 
-                var height = (float)(105 + grade * 6 + random.NextDouble() * 12);
-                var weight = (float)(16 + grade * 3 + random.NextDouble() * 10);
+                var height = (float)Math.Round(105 + grade * 6 + random.NextDouble() * 12, 1);
+                var weight = (float)Math.Round(16 + grade * 3 + random.NextDouble() * 10, 1);
 
                 students.Add(new Student
                 {

@@ -1,5 +1,6 @@
 using EduHealth.Data;
 using EduHealth.DTOs.Students.HealthProfile;
+using EduHealth.Helpers;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -333,7 +334,7 @@ namespace EduHealth.Services.Implementations
                 chronicNote,
                 generalHealthNote,
                 legacyLines);
-            student.User.UpdatedAt = DateTime.UtcNow;
+            student.User.UpdatedAt = VietnamTimeHelper.Now;
             _context.Entry(student.User).Property(x => x.UpdatedAt).IsModified = true;
 
             if (request.Allergies is not null)

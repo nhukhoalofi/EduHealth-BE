@@ -35,13 +35,13 @@ namespace EduHealth.Services.Implementations
 
             if (query.FromDate.HasValue)
             {
-                var from = DateTime.SpecifyKind(query.FromDate.Value, DateTimeKind.Utc);
+                var from = query.FromDate.Value;
                 q = q.Where(x => x.CreatedAt >= from);
             }
 
             if (query.ToDate.HasValue)
             {
-                var to = DateTime.SpecifyKind(query.ToDate.Value, DateTimeKind.Utc);
+                var to = query.ToDate.Value;
                 q = q.Where(x => x.CreatedAt <= to);
             }
 
