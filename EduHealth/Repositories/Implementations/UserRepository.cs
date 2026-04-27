@@ -124,6 +124,32 @@ namespace EduHealth.Repositories.Implementations
             return await query.AnyAsync(x => x.Email == email, cancellationToken);
         }
 
+        public async Task<int> GetNextUserCodeSequenceAsync(CancellationToken cancellationToken = default)
+        {
+            var codes = await _context.Users
+                .AsNoTracking()
+                .Where(x => x.Code.StartsWith("USR"))
+                .Select(x => x.Code)
+                .ToListAsync(cancellationToken);
+
+            var max = 0;
+            foreach (var code in codes)
+            {
+                if (code.Length <= 3)
+                {
+                    continue;
+                }
+
+                var numericPart = code[3..];
+                if (int.TryParse(numericPart, out var n) && n > max)
+                {
+                    max = n;
+                }
+            }
+
+            return max + 1;
+        }
+
         public async Task AddAsync(User user, CancellationToken cancellationToken = default)
         {
             await _context.Users.AddAsync(user, cancellationToken);

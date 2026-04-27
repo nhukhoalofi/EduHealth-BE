@@ -3,17 +3,26 @@ using EduHealth.DTOs.Users;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
+using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 
 namespace EduHealth.Services.Implementations
 {
     public class UserService : IUserService
     {
         private readonly IUserRepository _userRepository;
+        private readonly ISystemLogWriter _logWriter;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly IConfiguration _configuration;
 
-        public UserService(IUserRepository userRepository)
+        public UserService(IUserRepository userRepository, ISystemLogWriter logWriter, ICloudinaryService cloudinaryService, IConfiguration configuration)
         {
             _userRepository = userRepository;
+            _logWriter = logWriter;
+            _cloudinaryService = cloudinaryService;
+            _configuration = configuration;
         }
 
         public async Task<(IReadOnlyList<UserListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -76,11 +85,13 @@ namespace EduHealth.Services.Implementations
                 return (false, 409, "Dữ liệu bị trùng.", duplicateErrors, null);
             }
 
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
+            var nextUserSeq = await _userRepository.GetNextUserCodeSequenceAsync(cancellationToken);
+            var userCode = $"USR{nextUserSeq:D3}";
 
             var user = new User
             {
-                Code = "USR_TMP",
+                Code = userCode,
                 Username = username,
                 FullName = request.FullName.Trim(),
                 Email = email,
@@ -96,13 +107,21 @@ namespace EduHealth.Services.Implementations
             await _userRepository.AddAsync(user, cancellationToken);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
-            // reload
-            // generate Code (USR + UserId)
-            user.Code = $"USR{user.UserId:D3}";
-            _userRepository.Update(user);
-            await _userRepository.SaveChangesAsync(cancellationToken);
-
             var saved = await _userRepository.GetByIdAsync(user.UserId, cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "CREATE_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = saved!.FullName,
+                Description = "Tạo tài khoản y tá mới",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return (true, 201, "Tạo tài khoản y tá thành công.", Array.Empty<(string, string, string)>(), MapDetail(saved!));
         }
 
@@ -172,9 +191,22 @@ namespace EduHealth.Services.Implementations
                 return (false, "Dữ liệu không hợp lệ.", errors, null);
             }
 
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "UPDATE_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Cập nhật tài khoản y tá",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var saved = await _userRepository.GetByIdAsync(user.UserId, cancellationToken);
             return (true, "Cập nhật tài khoản thành công.", Array.Empty<(string, string, string)>(), MapDetail(saved!));
@@ -217,10 +249,29 @@ namespace EduHealth.Services.Implementations
             user.Status = status;
             user.LockReason = status == "LOCKED" ? request.Reason?.Trim() : null;
             user.IsActive = status == "ACTIVE";
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
 
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            var actor = await _userRepository.GetByIdAsync(currentUserId, cancellationToken);
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = currentUserId,
+                ActorName = actor?.FullName,
+                ActorUsername = actor?.Username,
+                ActorRole = actor?.Role,
+                Module = "USERS",
+                Action = status == "LOCKED" ? "LOCK_USER" : "UNLOCK_USER",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = status == "LOCKED"
+                    ? $"Khóa tài khoản {user.Username}" 
+                    : $"Mở khóa tài khoản {user.Username}",
+                Status = "SUCCESS",
+                Metadata = new { status = user.Status, reason = user.LockReason }
+            }, cancellationToken);
 
             return (true, "Cập nhật trạng thái tài khoản thành công.", Array.Empty<(string, string, string)>(), new
             {
@@ -278,9 +329,22 @@ namespace EduHealth.Services.Implementations
             }
 
             user.PasswordHash = PasswordHelper.HashPassword(newPassword);
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "USERS",
+                Action = "RESET_USER_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = $"Reset mật khẩu tài khoản ({mode.ToLower()})",
+                Status = "SUCCESS",
+                Metadata = new { mode = mode }
+            }, cancellationToken);
 
             return (true, mode == "CUSTOM" ? "Reset mật khẩu thành công." : "Reset mật khẩu tạm thành công.", Array.Empty<(string, string, string)>(), new ResetPasswordResponseDto
             {
@@ -289,6 +353,70 @@ namespace EduHealth.Services.Implementations
                 TemporaryPassword = temp,
                 UpdatedAt = user.UpdatedAt
             });
+        }
+
+        public async Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateAvatarByCodeAsync(
+            string code,
+            IFormFile file,
+            CancellationToken cancellationToken = default)
+        {
+            var errors = new List<(string Field, string Code, string Message)>();
+
+            if (file is null || file.Length == 0)
+            {
+                errors.Add(("file", "REQUIRED", "Vui lòng chọn file hình ảnh."));
+                return (false, "Dữ liệu không hợp lệ.", errors, null);
+            }
+
+            if (string.IsNullOrWhiteSpace(file.ContentType) || !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add(("file", "INVALID_FILE", "File không đúng định dạng hình ảnh."));
+                return (false, "Dữ liệu không hợp lệ.", errors, null);
+            }
+
+            var user = await _userRepository.GetByCodeAsync(code, cancellationToken);
+            if (user is null)
+            {
+                errors.Add(("id", "USER_NOT_FOUND", "Không tồn tại user với id đã cung cấp."));
+                return (false, "Không tìm thấy tài khoản.", errors, null);
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot)
+                ? "eduhealth/users"
+                : $"{folderRoot.Trim().TrimEnd('/')}/users";
+
+            try
+            {
+                var (url, _) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
+
+                user.Avatar = url;
+                user.UpdatedAt = VietnamTimeHelper.Now;
+                _userRepository.Update(user);
+                await _userRepository.SaveChangesAsync(cancellationToken);
+
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = null,
+                    ActorName = "Hệ thống",
+                    ActorRole = "SYSTEM",
+                    Module = "USERS",
+                    Action = "UPDATE_USER_AVATAR",
+                    TargetType = "User",
+                    TargetId = user.Code,
+                    TargetLabel = user.FullName,
+                    Description = $"Cập nhật ảnh đại diện cho tài khoản {user.Username}",
+                    Status = "SUCCESS",
+                    Metadata = new { avatarUrl = url }
+                }, cancellationToken);
+
+                return (true, "Cập nhật ảnh đại diện thành công.", Array.Empty<(string, string, string)>(), new { avatarUrl = url });
+            }
+            catch
+            {
+                errors.Add(("file", "UPLOAD_FAILED", "Upload hình ảnh thất bại."));
+                return (false, "Upload hình ảnh thất bại.", errors, null);
+            }
         }
 
         private static UserListItemDto MapListItem(User x) => new()

@@ -1,4 +1,5 @@
 ﻿using EduHealth.DTOs.Auth;
+using Microsoft.AspNetCore.Http;
 
 namespace EduHealth.Services.Interfaces
 {
@@ -14,5 +15,6 @@ namespace EduHealth.Services.Interfaces
         Task<ResetPasswordResultDto> ResetPasswordAsync(ResetPasswordRequestDto request, CancellationToken cancellationToken = default);
         Task<ChangePasswordResultDto> ChangePasswordAsync(int userId, ChangePasswordRequestDto request, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, string Field, MeResponseDto? Data)> UpdateProfileAsync(int userId, UpdateProfileRequestDto request, CancellationToken cancellationToken = default);
+        Task<(bool Success, string Message, string Field, string? AvatarUrl)> UpdateAvatarAsync(int userId, IFormFile file, CancellationToken cancellationToken = default);
     }
 }

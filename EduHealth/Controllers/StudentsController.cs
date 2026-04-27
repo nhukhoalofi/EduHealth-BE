@@ -144,9 +144,18 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/health-profile")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetHealthProfile([FromRoute] int id, CancellationToken cancellationToken)
         {
+            if (User.IsInRole("STUDENT"))
+            {
+                var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!int.TryParse(userIdClaim, out var currentUserId) || currentUserId != id)
+                {
+                    return Forbid();
+                }
+            }
+
             var data = await _studentHealthService.GetHealthProfileAsync(id, cancellationToken);
 
             if (data is null)
@@ -190,12 +199,21 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/health-history")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetHealthHistory(
             [FromRoute] int id,
             [FromQuery] StudentHealthHistoryQueryDto query,
             CancellationToken cancellationToken)
         {
+            if (User.IsInRole("STUDENT"))
+            {
+                var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!int.TryParse(userIdClaim, out var currentUserId) || currentUserId != id)
+                {
+                    return Forbid();
+                }
+            }
+
             var result = await _studentHealthService.GetHealthHistoryAsync(id, query, cancellationToken);
             if (result is null)
             {
@@ -219,9 +237,18 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("{id:int}/vaccinations")]
-        [Authorize(Roles = "ADMIN,NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
         public async Task<IActionResult> GetVaccinations([FromRoute] int id, CancellationToken cancellationToken)
         {
+            if (User.IsInRole("STUDENT"))
+            {
+                var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!int.TryParse(userIdClaim, out var currentUserId) || currentUserId != id)
+                {
+                    return Forbid();
+                }
+            }
+
             var data = await _vaccinationService.GetStudentVaccinationHistoryAsync(id, cancellationToken);
 
             if (data is null)

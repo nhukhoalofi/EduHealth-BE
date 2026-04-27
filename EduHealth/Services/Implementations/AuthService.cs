@@ -15,6 +15,8 @@ namespace EduHealth.Services.Implementations
         private readonly JwtHelper _jwtHelper;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthService> _logger;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly ISystemLogWriter _logWriter;
 
         public AuthService(
             IUserRepository userRepository,
@@ -22,7 +24,9 @@ namespace EduHealth.Services.Implementations
             IEmailSender emailSender,
             JwtHelper jwtHelper,
             IConfiguration configuration,
-            ILogger<AuthService> logger)
+            ILogger<AuthService> logger,
+            ICloudinaryService cloudinaryService,
+            ISystemLogWriter logWriter)
         {
             _userRepository = userRepository;
             _passwordResetOtpRepository = passwordResetOtpRepository;
@@ -30,6 +34,8 @@ namespace EduHealth.Services.Implementations
             _jwtHelper = jwtHelper;
             _configuration = configuration;
             _logger = logger;
+            _cloudinaryService = cloudinaryService;
+            _logWriter = logWriter;
         }
 
         public async Task<LoginResponseDto?> LoginAsync(LoginRequestDto request, CancellationToken cancellationToken = default)
@@ -55,10 +61,23 @@ namespace EduHealth.Services.Implementations
 
             var (token, expiresAt) = _jwtHelper.GenerateToken(user);
 
-            user.LastLoginAt = DateTime.UtcNow;
-            user.UpdatedAt = DateTime.UtcNow;
+            user.LastLoginAt = VietnamTimeHelper.Now;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = user.UserId,
+                Module = "AUTH",
+                Action = "LOGIN",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đăng nhập tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return new LoginResponseDto
             {
@@ -73,6 +92,7 @@ namespace EduHealth.Services.Implementations
             };
         }
 
+        // Ghi đè/cập nhật hàm GetMeAsync
         public async Task<MeResponseDto?> GetMeAsync(int userId, CancellationToken cancellationToken = default)
         {
             var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
@@ -85,11 +105,13 @@ namespace EduHealth.Services.Implementations
             return new MeResponseDto
             {
                 UserId = user.UserId,
+                Username = user.Username,
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
                 Role = user.Role,
                 IsActive = user.IsActive,
+                Status = user.Status,
                 Avatar = user.Avatar
             };
         }
@@ -127,7 +149,7 @@ namespace EduHealth.Services.Implementations
                 OtpExpiresAt = DateTime.UtcNow.AddMinutes(otpExpireMinutes),
                 IsVerified = false,
                 IsUsed = false,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             await _passwordResetOtpRepository.AddAsync(entity, cancellationToken);
@@ -180,7 +202,7 @@ namespace EduHealth.Services.Implementations
             var resetToken = Guid.NewGuid().ToString("N");
 
             record.IsVerified = true;
-            record.VerifiedAt = DateTime.UtcNow;
+            record.VerifiedAt = VietnamTimeHelper.Now;
             record.ResetToken = resetToken;
             record.ResetTokenExpiresAt = DateTime.UtcNow.AddMinutes(resetTokenExpireMinutes);
 
@@ -190,7 +212,7 @@ namespace EduHealth.Services.Implementations
             return new VerifyOtpResponseDto
             {
                 ResetToken = resetToken,
-                ExpiresAt = record.ResetTokenExpiresAt!.Value
+                ExpiresAt = VietnamTimeHelper.ToVietnamTime(record.ResetTokenExpiresAt!.Value)
             };
         }
 
@@ -255,6 +277,19 @@ namespace EduHealth.Services.Implementations
             _passwordResetOtpRepository.Update(record);
 
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "AUTH",
+                Action = "RESET_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đặt lại mật khẩu tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return new ResetPasswordResultDto { Success = true, Message = "Đặt lại mật khẩu thành công." };
         }
@@ -363,6 +398,19 @@ namespace EduHealth.Services.Implementations
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = userId,
+                Module = "AUTH",
+                Action = "CHANGE_PASSWORD",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Đổi mật khẩu tài khoản",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
+
             return new ChangePasswordResultDto
             {
                 Success = true,
@@ -388,22 +436,91 @@ namespace EduHealth.Services.Implementations
                 user.Phone = request.Phone.Trim();
             }
 
-            user.UpdatedAt = DateTime.UtcNow;
+            user.UpdatedAt = VietnamTimeHelper.Now;
             _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = userId,
+                Module = "AUTH",
+                Action = "UPDATE_PROFILE",
+                TargetType = "User",
+                TargetId = user.Code,
+                TargetLabel = user.FullName,
+                Description = "Cập nhật hồ sơ cá nhân",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var response = new MeResponseDto
             {
                 UserId = user.UserId,
+                Username = user.Username,
                 FullName = user.FullName,
                 Email = user.Email,
                 Phone = user.Phone,
                 Role = user.Role,
                 IsActive = user.IsActive,
+                Status = user.Status,
                 Avatar = user.Avatar
             };
 
             return (true, "Cập nhật hồ sơ cá nhân thành công.", string.Empty, response);
+        }
+
+        public async Task<(bool Success, string Message, string Field, string? AvatarUrl)> UpdateAvatarAsync(int userId, IFormFile file, CancellationToken cancellationToken = default)
+        {
+            if (file is null || file.Length == 0)
+            {
+                return (false, "Vui lòng chọn file hình ảnh.", "file", null);
+            }
+
+            if (string.IsNullOrWhiteSpace(file.ContentType) || !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return (false, "File không đúng định dạng hình ảnh.", "file", null);
+            }
+
+            var user = await _userRepository.GetByIdAsync(userId, cancellationToken);
+            if (user is null)
+            {
+                return (false, "Không tìm thấy người dùng.", "id", null);
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot)
+                ? "eduhealth/users"
+                : $"{folderRoot.Trim().TrimEnd('/')}/users";
+
+            try
+            {
+                var (url, publicId) = await _cloudinaryService.UploadImageAsync(file, folder, cancellationToken);
+
+                user.Avatar = url;
+                user.UpdatedAt = VietnamTimeHelper.Now;
+                _userRepository.Update(user);
+                await _userRepository.SaveChangesAsync(cancellationToken);
+
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = userId,
+                    Module = "AUTH",
+                    Action = "UPDATE_AVATAR",
+                    TargetType = "User",
+                    TargetId = user.Code,
+                    TargetLabel = user.FullName,
+                    Description = "Cập nhật ảnh đại diện",
+                    Status = "SUCCESS",
+                    Metadata = new { }
+                }, cancellationToken);
+
+                return (true, "Cập nhật ảnh đại diện thành công.", string.Empty, url);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Upload avatar chi tiết lỗi cho userId {UserId}", userId);
+                return (false, "Upload hình ảnh thất bại.", "file", null);
+            }
         }
     }
 }

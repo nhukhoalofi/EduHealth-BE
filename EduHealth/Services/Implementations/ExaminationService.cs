@@ -1,6 +1,7 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Examinations;
+using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -11,11 +12,13 @@ namespace EduHealth.Services.Implementations
     {
         private readonly AppDbContext _context;
         private readonly IExaminationRepository _examinationRepository;
+        private readonly ISystemLogWriter _logWriter;
 
-        public ExaminationService(AppDbContext context, IExaminationRepository examinationRepository)
+        public ExaminationService(AppDbContext context, IExaminationRepository examinationRepository, ISystemLogWriter logWriter)
         {
             _context = context;
             _examinationRepository = examinationRepository;
+            _logWriter = logWriter;
         }
 
         public async Task<(IReadOnlyList<ExaminationListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -227,7 +230,7 @@ namespace EduHealth.Services.Implementations
                         var med = meds[item.MedicineId];
                         var stockBefore = med.StockQuantity;
                         med.StockQuantity -= item.Quantity;
-                        med.UpdatedAt = DateTime.UtcNow;
+                        med.UpdatedAt = VietnamTimeHelper.Now;
 
                         createdPrescriptions.Add(new VisitPrescription
                         {
@@ -250,7 +253,7 @@ namespace EduHealth.Services.Implementations
                             BatchNumber = null,
                             Note = null,
                             VisitId = visit.VisitId,
-                            CreatedAt = DateTime.UtcNow
+                            CreatedAt = VietnamTimeHelper.Now
                         });
                     }
 
@@ -315,8 +318,21 @@ namespace EduHealth.Services.Implementations
                             Quantity = m.Quantity
                         };
                     }).ToList(),
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = VietnamTimeHelper.Now
                 };
+
+                await _logWriter.WriteAsync(new SystemLogWriteRequest
+                {
+                    ActorUserId = nurseUserId,
+                    Module = "EXAMINATIONS",
+                    Action = "CREATE_EXAMINATION",
+                    TargetType = "Examination",
+                    TargetId = visit.Code,
+                    TargetLabel = $"Khám - {student.FullName}",
+                    Description = $"Tạo phiếu khám cho học sinh {student.FullName}",
+                    Status = "SUCCESS",
+                    Metadata = new { }
+                }, cancellationToken);
 
                 return (true, 201, "Tạo phiếu khám thành công.", Array.Empty<(string, string, string)>(), response);
             }

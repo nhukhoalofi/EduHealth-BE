@@ -1,5 +1,6 @@
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Medicines;
+using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
 
@@ -13,10 +14,12 @@ namespace EduHealth.Services.Implementations
         };
 
         private readonly IMedicineRepository _medicineRepository;
+        private readonly ISystemLogWriter _logWriter;
 
-        public MedicineService(IMedicineRepository medicineRepository)
+        public MedicineService(IMedicineRepository medicineRepository, ISystemLogWriter logWriter)
         {
             _medicineRepository = medicineRepository;
+            _logWriter = logWriter;
         }
 
         public async Task<(IReadOnlyList<MedicineListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -29,7 +32,7 @@ namespace EduHealth.Services.Implementations
             var (items, total) = await _medicineRepository.GetPagedAsync(query.Keyword, query.Status, query.LowStock, null, page, pageSize, cancellationToken);
 
             var list = new List<MedicineListItemDto>(items.Count);
-            var expiringThreshold = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
+            var expiringThreshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
 
             foreach (var m in items)
             {
@@ -71,7 +74,7 @@ namespace EduHealth.Services.Implementations
             }
 
             var nearestExpiry = await _medicineRepository.GetNearestExpiryDateAsync(medicine.MedicineId, cancellationToken);
-            var expiringThreshold = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
+            var expiringThreshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
 
             var dto = new MedicineDetailDto
             {
@@ -119,7 +122,7 @@ namespace EduHealth.Services.Implementations
                 return (false, 409, "Thuốc đã tồn tại.", new[] { ("name", "MEDICINE_ALREADY_EXISTS", "Tên thuốc đã tồn tại trong hệ thống.") }, null);
             }
 
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
 
             var medicine = new Medicine
             {
@@ -142,6 +145,19 @@ namespace EduHealth.Services.Implementations
             medicine.Code = $"MED{medicine.MedicineId:D3}";
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "CREATE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = "Tạo thuốc mới",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             var detail = (await GetDetailAsync(medicine.Code, cancellationToken)).Data;
             return (true, 201, "Tạo thuốc thành công.", Array.Empty<(string, string, string)>(), detail);
@@ -215,9 +231,22 @@ namespace EduHealth.Services.Implementations
             if (errors.Count > 0)
                 return (false, "Dữ liệu không hợp lệ.", errors, null);
 
-            medicine.UpdatedAt = DateTime.UtcNow;
+            medicine.UpdatedAt = VietnamTimeHelper.Now;
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "UPDATE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = "Cập nhật thông tin thuốc",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return (true, "Cập nhật thuốc thành công.", Array.Empty<(string, string, string)>(), new
             {
@@ -253,9 +282,22 @@ namespace EduHealth.Services.Implementations
             }
 
             medicine.Status = status;
-            medicine.UpdatedAt = DateTime.UtcNow;
+            medicine.UpdatedAt = VietnamTimeHelper.Now;
             _medicineRepository.Update(medicine);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "MEDICINES",
+                Action = "UPDATE_MEDICINE_STATUS",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Cập nhật trạng thái thuốc thành {status}",
+                Status = "SUCCESS",
+                Metadata = new { status = status, reason = request.Reason?.Trim() }
+            }, cancellationToken);
 
             return (true, "Cập nhật trạng thái thuốc thành công.", Array.Empty<(string, string, string)>(), new
             {
@@ -277,7 +319,7 @@ namespace EduHealth.Services.Implementations
             if (request.Quantity <= 0)
                 errors.Add(("quantity", "INVALID_QUANTITY", "quantity phải > 0."));
 
-            if (request.ExpiryDate <= DateOnly.FromDateTime(DateTime.UtcNow))
+            if (request.ExpiryDate <= VietnamTimeHelper.TodayDateOnly)
                 errors.Add(("expiryDate", "INVALID_EXPIRY_DATE", "expiryDate phải lớn hơn ngày hiện tại."));
 
             if (errors.Count > 0)
@@ -291,7 +333,7 @@ namespace EduHealth.Services.Implementations
 
             var stockBefore = medicine.StockQuantity;
             medicine.StockQuantity += request.Quantity;
-            medicine.UpdatedAt = DateTime.UtcNow;
+            medicine.UpdatedAt = VietnamTimeHelper.Now;
 
             var log = new MedicineStockLog
             {
@@ -305,12 +347,33 @@ namespace EduHealth.Services.Implementations
                 ExpiryDate = request.ExpiryDate,
                 BatchNumber = request.BatchNumber?.Trim(),
                 Note = request.Note?.Trim(),
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             _medicineRepository.Update(medicine);
             await _medicineRepository.AddMovementAsync(log, cancellationToken);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = performedByUserId,
+                Module = "MEDICINES",
+                Action = "STOCK_IN",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Nhập kho thuốc {medicine.Name}",
+                Status = "SUCCESS",
+                Metadata = new
+                {
+                    quantity = request.Quantity,
+                    stockBefore,
+                    stockAfter = medicine.StockQuantity,
+                    expiryDate = request.ExpiryDate,
+                    batchNumber = request.BatchNumber,
+                    note = request.Note
+                }
+            }, cancellationToken);
 
             return (true, "Nhập kho thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {
@@ -357,7 +420,7 @@ namespace EduHealth.Services.Implementations
 
             var stockBefore = medicine.StockQuantity;
             medicine.StockQuantity -= request.Quantity;
-            medicine.UpdatedAt = DateTime.UtcNow;
+            medicine.UpdatedAt = VietnamTimeHelper.Now;
 
             var log = new MedicineStockLog
             {
@@ -371,12 +434,34 @@ namespace EduHealth.Services.Implementations
                 ExpiryDate = request.ExpiryDate,
                 BatchNumber = request.BatchNumber?.Trim(),
                 Note = request.Note?.Trim(),
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             _medicineRepository.Update(medicine);
             await _medicineRepository.AddMovementAsync(log, cancellationToken);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = performedByUserId,
+                Module = "MEDICINES",
+                Action = "DISPOSE_MEDICINE",
+                TargetType = "Medicine",
+                TargetId = medicine.Code,
+                TargetLabel = medicine.Name,
+                Description = $"Hủy thuốc {medicine.Name}",
+                Status = "SUCCESS",
+                Metadata = new
+                {
+                    quantity = request.Quantity,
+                    stockBefore,
+                    stockAfter = medicine.StockQuantity,
+                    reason = request.Reason,
+                    expiryDate = request.ExpiryDate,
+                    batchNumber = request.BatchNumber,
+                    note = request.Note
+                }
+            }, cancellationToken);
 
             return (true, "Hủy thuốc thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {
@@ -438,7 +523,7 @@ namespace EduHealth.Services.Implementations
         public async Task<IReadOnlyList<MedicineAlertItemDto>> GetAlertsAsync(string type, CancellationToken cancellationToken = default)
         {
             var upper = string.IsNullOrWhiteSpace(type) ? "ALL" : type.Trim().ToUpperInvariant();
-            var threshold = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
+            var threshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
 
             var (items, _) = await _medicineRepository.GetPagedAsync(null, "ACTIVE", null, null, 1, 1000, cancellationToken);
             var result = new List<MedicineAlertItemDto>();

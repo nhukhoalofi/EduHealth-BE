@@ -53,7 +53,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpGet("me")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> Me(CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -147,7 +147,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPost("change-password")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> ChangePassword(
             [FromBody] ChangePasswordRequestDto request,
             CancellationToken cancellationToken)
@@ -170,7 +170,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPatch("me")]
-        [Authorize]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
         public async Task<IActionResult> UpdateMe([FromBody] UpdateProfileRequestDto request, CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -188,6 +188,28 @@ namespace EduHealth.Controllers
             }
 
             return Ok(ApiResponse<MeResponseDto>.Ok(result.Data, result.Message));
+        }
+
+        [HttpPatch("me/avatar")]
+        [Authorize(Roles = "STUDENT,ADMIN,NURSE")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UpdateMyAvatar([FromForm] UpdateAvatarRequestDto request, CancellationToken cancellationToken)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ."));
+            }
+
+            var result = await _authService.UpdateAvatarAsync(userId, request.File, cancellationToken);
+
+            if (!result.Success)
+            {
+                return BadRequest(ApiResponse<object>.Fail(result.Message, result.Field));
+            }
+
+            return Ok(ApiResponse<object>.Ok(new { avatarUrl = result.AvatarUrl }, result.Message));
         }
     }
 }

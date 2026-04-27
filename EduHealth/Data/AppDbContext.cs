@@ -27,6 +27,7 @@ namespace EduHealth.Data
         public DbSet<Notification> Notifications => Set<Notification>();
         public DbSet<NotificationRecipient> NotificationRecipients => Set<NotificationRecipient>();
         public DbSet<PasswordResetOtp> PasswordResetOtps => Set<PasswordResetOtp>();
+        public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

@@ -1,6 +1,7 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Vaccinations;
+using EduHealth.Helpers;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,10 +14,12 @@ namespace EduHealth.Services.Implementations
         private static readonly HashSet<string> AllowedStudentVaccinationStatuses = new(StringComparer.OrdinalIgnoreCase) { "PENDING", "DONE", "POSTPONED", "CONTRAINDICATED", "ABSENT" };
 
         private readonly AppDbContext _context;
+        private readonly ISystemLogWriter _logWriter;
 
-        public VaccinationService(AppDbContext context)
+        public VaccinationService(AppDbContext context, ISystemLogWriter logWriter)
         {
             _context = context;
+            _logWriter = logWriter;
         }
 
         public async Task<(IReadOnlyList<VaccinationCampaignListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetCampaignsAsync(
@@ -141,7 +144,7 @@ namespace EduHealth.Services.Implementations
                 Status = "ACTIVE",
                 Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim(),
                 CreatedByUserId = createdByUserId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = VietnamTimeHelper.Now
             };
 
             _context.VaccinationCampaigns.Add(campaign);
@@ -192,7 +195,7 @@ namespace EduHealth.Services.Implementations
             }
 
             // generate student vaccination records
-            var now = DateTime.UtcNow;
+            var now = VietnamTimeHelper.Now;
             foreach (var uid in targetUserIds.Distinct())
             {
                 _context.StudentVaccinations.Add(new StudentVaccination
@@ -207,6 +210,19 @@ namespace EduHealth.Services.Implementations
 
             await _context.SaveChangesAsync(cancellationToken);
             await tx.CommitAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = createdByUserId,
+                Module = "VACCINATIONS",
+                Action = "CREATE_CAMPAIGN",
+                TargetType = "VaccinationCampaign",
+                TargetId = campaign.Code,
+                TargetLabel = campaign.Name,
+                Description = $"Tạo đợt tiêm {campaign.Name}",
+                Status = "SUCCESS",
+                Metadata = new { }
+            }, cancellationToken);
 
             return (true, 201, "Tạo đợt tiêm thành công.", Array.Empty<(string, string, string)>(), new CreateVaccinationCampaignResponseDto
             {
@@ -342,10 +358,23 @@ namespace EduHealth.Services.Implementations
             entity.VaccinatedAt = request.VaccinatedAt;
             entity.LotNumber = string.IsNullOrWhiteSpace(request.LotNumber) ? null : request.LotNumber.Trim();
             entity.Note = string.IsNullOrWhiteSpace(request.Note) ? null : request.Note.Trim();
-            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedAt = VietnamTimeHelper.Now;
 
             _context.StudentVaccinations.Update(entity);
             await _context.SaveChangesAsync(cancellationToken);
+
+            await _logWriter.WriteAsync(new SystemLogWriteRequest
+            {
+                ActorUserId = null,
+                Module = "VACCINATIONS",
+                Action = "UPDATE_STUDENT_VACCINATION",
+                TargetType = "StudentVaccination",
+                TargetId = $"SV{entity.RecordId:D3}",
+                TargetLabel = $"Tiêm - {entity.Campaign.Name}",
+                Description = "Cập nhật trạng thái tiêm chủng",
+                Status = "SUCCESS",
+                Metadata = new { studentId = entity.UserId, campaignId = entity.CampaignId, status = status }
+            }, cancellationToken);
 
             return (true, 200, "Cập nhật trạng thái tiêm thành công.", Array.Empty<(string, string, string)>(), new UpdateStudentVaccinationResponseDto
             {
