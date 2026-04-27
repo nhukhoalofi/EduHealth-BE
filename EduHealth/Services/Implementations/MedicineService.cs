@@ -36,7 +36,7 @@ namespace EduHealth.Services.Implementations
 
             foreach (var m in items)
             {
-                var nearestExpiry = await _medicineRepository.GetNearestExpiryDateAsync(m.MedicineId, cancellationToken);
+                var nearestExpiry = m.NearestExpiryDate;
                 var isLowStock = m.StockQuantity <= m.WarningThreshold;
                 var isExpiring = nearestExpiry.HasValue && nearestExpiry.Value <= expiringThreshold;
 
@@ -73,7 +73,7 @@ namespace EduHealth.Services.Implementations
                 return (false, null);
             }
 
-            var nearestExpiry = await _medicineRepository.GetNearestExpiryDateAsync(medicine.MedicineId, cancellationToken);
+            var nearestExpiry = medicine.NearestExpiryDate;
             var expiringThreshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
 
             var dto = new MedicineDetailDto

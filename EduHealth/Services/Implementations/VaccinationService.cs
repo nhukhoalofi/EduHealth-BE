@@ -128,7 +128,12 @@ namespace EduHealth.Services.Implementations
             var vaccination = await _context.Vaccinations.FirstOrDefaultAsync(x => x.Name == request.VaccineName.Trim(), cancellationToken);
             if (vaccination is null)
             {
-                vaccination = new Vaccination { Name = request.VaccineName.Trim() };
+                vaccination = new Vaccination
+                {
+                    Name = request.VaccineName.Trim(),
+                    Description = null,
+                    CreatedAt = VietnamTimeHelper.Now
+                };
                 _context.Vaccinations.Add(vaccination);
                 await _context.SaveChangesAsync(cancellationToken);
             }

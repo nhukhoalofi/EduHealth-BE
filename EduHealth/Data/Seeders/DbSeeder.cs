@@ -8,6 +8,12 @@ namespace EduHealth.Data.Seeders
     {
         public static async Task SeedAdminAsync(AppDbContext context)
         {
+            // Only seed on first run (empty DB).
+            if (await context.Users.AnyAsync())
+            {
+                return;
+            }
+
             await SeedUsersAsync(context);
             await SeedSchoolClassesAsync(context);
             await SeedDiseaseTypesAsync(context);
@@ -561,7 +567,7 @@ namespace EduHealth.Data.Seeders
                 Username = "admin",
                 Phone = "0900000001",
                 Role = "ADMIN",
-                FullName = "System Admin",
+                FullName = "System Admin",  
                 IsActive = true,
                 Status = "ACTIVE",
                 CreatedAt = DateTime.UtcNow,
@@ -743,9 +749,9 @@ namespace EduHealth.Data.Seeders
             if (await context.Vaccinations.AnyAsync()) return;
 
             context.Vaccinations.AddRange(
-                new Vaccination { Name = "COVID-19" },
-                new Vaccination { Name = "Sởi" },
-                new Vaccination { Name = "Uốn ván" }
+                new Vaccination { Name = "COVID-19", Description = "Vắc xin phòng COVID-19", CreatedAt = DateTime.UtcNow },
+                new Vaccination { Name = "Sởi", Description = "Vắc xin phòng bệnh sởi", CreatedAt = DateTime.UtcNow },
+                new Vaccination { Name = "Uốn ván", Description = "Vắc xin phòng uốn ván", CreatedAt = DateTime.UtcNow }
             );
 
             await context.SaveChangesAsync();

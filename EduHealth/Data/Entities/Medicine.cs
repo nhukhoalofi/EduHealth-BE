@@ -10,6 +10,7 @@
         public string? Packaging { get; set; }
         public int WarningThreshold { get; set; }
         public int StockQuantity { get; set; }
+        public DateOnly? NearestExpiryDate { get; set; }
         public string Status { get; set; } = "ACTIVE";
         public string? Note { get; set; }
         public DateTime CreatedAt { get; set; }

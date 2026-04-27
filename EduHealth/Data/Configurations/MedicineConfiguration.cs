@@ -35,7 +35,7 @@ namespace EduHealth.Data.Configurations
 
             builder.Property(x => x.WarningThreshold)
                 .IsRequired();
-
+            builder.Property(x => x.NearestExpiryDate).HasColumnType("date");
             builder.Property(x => x.StockQuantity)
                 .IsRequired();
 

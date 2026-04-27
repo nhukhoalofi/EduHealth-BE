@@ -80,9 +80,9 @@ namespace EduHealth.Services.Implementations
                     Group = "vaccines",
                     Code = $"VAC-{x.VaccinationId:D3}",
                     Name = x.Name,
-                    Description = null,
+                    Description = x.Description,
                     Status = "ACTIVE",
-                    CreatedAt = null,
+                    CreatedAt = x.CreatedAt,
                     UpdatedAt = null
                 }).ToList();
 
@@ -176,9 +176,9 @@ namespace EduHealth.Services.Implementations
                     Group = "vaccines",
                     Code = $"VAC-{v.VaccinationId:D3}",
                     Name = v.Name,
-                    Description = null,
+                    Description = v.Description,
                     Status = "ACTIVE",
-                    CreatedAt = null,
+                    CreatedAt = v.CreatedAt,
                     UpdatedAt = null
                 });
             }
@@ -222,7 +222,11 @@ namespace EduHealth.Services.Implementations
             return (false, null);
         }
 
-        private static int NormalizePage(int? page) => page.GetValueOrDefault(1) <= 0 ? 1 : page!.Value;
+        private static int NormalizePage(int? page)
+        {
+            var value = page.GetValueOrDefault(1);
+            return value <= 0 ? 1 : value;
+        }
 
         private static int NormalizePageSize(int? pageSize)
         {
