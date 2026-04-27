@@ -132,6 +132,10 @@ namespace EduHealth.Data.Seeders
         private static async Task SeedManyStudentsAsync(AppDbContext context)
         {
             // Create 300 students/users: 5 grades * 2 classes/grade * 30 students/class
+            if (await context.Students.AnyAsync())
+            {
+                return;
+            }
             const int studentsPerClass = 30;
             const int userStart = 100;
 

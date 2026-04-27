@@ -86,10 +86,12 @@ namespace EduHealth.Services.Implementations
             }
 
             var now = DateTime.UtcNow;
+            var nextUserSeq = await _userRepository.GetNextUserCodeSequenceAsync(cancellationToken);
+            var userCode = $"USR{nextUserSeq:D3}";
 
             var user = new User
             {
-                Code = "USR_TMP",
+                Code = userCode,
                 Username = username,
                 FullName = request.FullName.Trim(),
                 Email = email,
@@ -103,12 +105,6 @@ namespace EduHealth.Services.Implementations
             };
 
             await _userRepository.AddAsync(user, cancellationToken);
-            await _userRepository.SaveChangesAsync(cancellationToken);
-
-            // reload
-            // generate Code (USR + UserId)
-            user.Code = $"USR{user.UserId:D3}";
-            _userRepository.Update(user);
             await _userRepository.SaveChangesAsync(cancellationToken);
 
             var saved = await _userRepository.GetByIdAsync(user.UserId, cancellationToken);

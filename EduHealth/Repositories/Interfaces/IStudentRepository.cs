@@ -17,6 +17,8 @@ namespace EduHealth.Repositories.Interfaces
         Task<bool> AnyEmailAsync(string email, int? excludeUserId = null, CancellationToken cancellationToken = default);
         Task<bool> AnyPhoneAsync(string phone, int? excludeUserId = null, CancellationToken cancellationToken = default);
         Task<bool> ClassExistsAsync(int classId, CancellationToken cancellationToken = default);
+        Task<int> GetNextUserCodeSequenceAsync(CancellationToken cancellationToken = default);
+        Task<int> GetNextStudentCodeSequenceAsync(CancellationToken cancellationToken = default);
 
         Task AddAsync(User user, Student student, CancellationToken cancellationToken = default);
         Task AddRangeAsync(IReadOnlyList<User> users, IReadOnlyList<Student> students, CancellationToken cancellationToken = default);

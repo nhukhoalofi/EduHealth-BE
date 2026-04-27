@@ -97,6 +97,58 @@ namespace EduHealth.Repositories.Implementations
             return await _context.SchoolClasses.AnyAsync(x => x.ClassId == classId, cancellationToken);
         }
 
+        public async Task<int> GetNextUserCodeSequenceAsync(CancellationToken cancellationToken = default)
+        {
+            var codes = await _context.Users
+                .AsNoTracking()
+                .Where(x => x.Code.StartsWith("USR"))
+                .Select(x => x.Code)
+                .ToListAsync(cancellationToken);
+
+            var max = 0;
+            foreach (var code in codes)
+            {
+                if (code.Length <= 3)
+                {
+                    continue;
+                }
+
+                var numericPart = code[3..];
+                if (int.TryParse(numericPart, out var n) && n > max)
+                {
+                    max = n;
+                }
+            }
+
+            return max + 1;
+        }
+
+        public async Task<int> GetNextStudentCodeSequenceAsync(CancellationToken cancellationToken = default)
+        {
+            var codes = await _context.Students
+                .AsNoTracking()
+                .Where(x => x.Code.StartsWith("STD"))
+                .Select(x => x.Code)
+                .ToListAsync(cancellationToken);
+
+            var max = 0;
+            foreach (var code in codes)
+            {
+                if (code.Length <= 3)
+                {
+                    continue;
+                }
+
+                var numericPart = code[3..];
+                if (int.TryParse(numericPart, out var n) && n > max)
+                {
+                    max = n;
+                }
+            }
+
+            return max + 1;
+        }
+
         public async Task AddAsync(User user, Student student, CancellationToken cancellationToken = default)
         {
             await _context.Users.AddAsync(user, cancellationToken);
