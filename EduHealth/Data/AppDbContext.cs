@@ -28,6 +28,10 @@ namespace EduHealth.Data
         public DbSet<NotificationRecipient> NotificationRecipients => Set<NotificationRecipient>();
         public DbSet<PasswordResetOtp> PasswordResetOtps => Set<PasswordResetOtp>();
         public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
+        public DbSet<Conversation> Conversations => Set<Conversation>();
+        public DbSet<ConversationParticipant> ConversationParticipants => Set<ConversationParticipant>();
+        public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+        public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

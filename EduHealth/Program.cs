@@ -2,12 +2,11 @@
 using EduHealth.Data.Seeders;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Implementations;
-using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Implementations;
 using EduHealth.Services.Interfaces;
 using EduHealth.Services;
-using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
+using EduHealth.Hubs;
 using CloudinaryDotNet;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +17,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
@@ -53,6 +53,21 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments("/hubs/chat"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
         };
     });
 
@@ -106,6 +121,8 @@ builder.Services.AddScoped<ISystemLogService, SystemLogService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IMessagingRepository, MessagingRepository>();
+builder.Services.AddScoped<IMessagingService, MessagingService>();
 
 var app = builder.Build();
 
@@ -122,6 +139,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<ChatHub>("/hubs/chat");
 
 // migrate + seed
 using (var scope = app.Services.CreateScope())
