@@ -117,6 +117,11 @@ namespace EduHealth.Services.Implementations
         {
             var errors = new List<(string Field, string Code, string Message)>();
 
+            if (nurseUserId <= 0)
+            {
+                return (false, 401, "Phiên đăng nhập không hợp lệ.", new[] { ("nurseId", "UNAUTHORIZED", "Không xác định được y tá đang đăng nhập.") }, null);
+            }
+
             if (string.IsNullOrWhiteSpace(request.StudentId))
                 errors.Add(("studentId", "REQUIRED", "studentId bắt buộc."));
 
@@ -153,14 +158,26 @@ namespace EduHealth.Services.Implementations
                 return (false, 404, "Không tìm thấy dữ liệu liên quan.", new[] { ("studentId", "STUDENT_NOT_FOUND", "studentId không tồn tại.") }, null);
             }
 
+            var nurse = await _context.Users.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.UserId == nurseUserId, cancellationToken);
+
+            if (nurse is null)
+            {
+                return (false, 404, "Không tìm thấy dữ liệu liên quan.", new[] { ("nurseId", "NURSE_NOT_FOUND", "Không tìm thấy tài khoản y tá.") }, null);
+            }
+
             DiseaseType? disease = null;
-            if (!string.IsNullOrWhiteSpace(request.DiseaseTypeId))
+            if (request.DiseaseId.HasValue)
+            {
+                disease = await _examinationRepository.GetDiseaseTypeByIdAsync(request.DiseaseId.Value, cancellationToken);
+                if (disease is null)
+                    return (false, 404, "Không tìm thấy dữ liệu liên quan.", new[] { ("diseaseId", "DISEASE_TYPE_NOT_FOUND", "diseaseId không tồn tại.") }, null);
+            }
+            else if (!string.IsNullOrWhiteSpace(request.DiseaseTypeId))
             {
                 disease = await _examinationRepository.GetDiseaseTypeByCodeAsync(request.DiseaseTypeId.Trim(), cancellationToken);
                 if (disease is null)
-                {
                     return (false, 404, "Không tìm thấy dữ liệu liên quan.", new[] { ("diseaseTypeId", "DISEASE_TYPE_NOT_FOUND", "diseaseTypeId không tồn tại.") }, null);
-                }
             }
 
             var prescriptions = request.Prescriptions?.ToList() ?? new List<CreateExaminationPrescriptionItemDto>();
@@ -187,9 +204,11 @@ namespace EduHealth.Services.Implementations
                 await _examinationRepository.AddVisitAsync(visit, cancellationToken);
                 await _examinationRepository.SaveChangesAsync(cancellationToken);
 
-                visit.Code = $"VIS{visit.VisitId:D3}";
-                _context.HealthVisits.Update(visit);
-                await _examinationRepository.SaveChangesAsync(cancellationToken);
+                var (codeAssigned, codeError) = await AssignUniqueVisitCodeAsync(visit, cancellationToken);
+                if (!codeAssigned)
+                {
+                    return (false, 409, "Không thể tạo mã phiếu khám. Vui lòng thử lại.", new[] { ("code", "VIS_CODE_CONFLICT", codeError ?? "Mã phiếu khám bị trùng.") }, null);
+                }
 
                 var createdPrescriptions = new List<VisitPrescription>();
                 var inventoryMovements = new List<MedicineStockLog>();
@@ -272,8 +291,6 @@ namespace EduHealth.Services.Implementations
                 await tx.CommitAsync(cancellationToken);
 
                 // Load nurse for response
-                var nurse = await _context.Users.AsNoTracking().FirstAsync(x => x.UserId == nurseUserId, cancellationToken);
-
                 var response = new CreateExaminationResponseDto
                 {
                     Id = visit.Code,
@@ -341,6 +358,88 @@ namespace EduHealth.Services.Implementations
                 await tx.RollbackAsync(cancellationToken);
                 throw;
             }
+        }
+
+        private async Task<(bool Success, string? ErrorMessage)> AssignUniqueVisitCodeAsync(HealthVisit visit, CancellationToken cancellationToken)
+        {
+            const int maxAttempts = 5;
+
+            for (var attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                visit.Code = await GenerateNextVisitCodeAsync(cancellationToken);
+                _context.HealthVisits.Update(visit);
+
+                try
+                {
+                    await _examinationRepository.SaveChangesAsync(cancellationToken);
+                    return (true, null);
+                }
+                catch (DbUpdateException ex) when (IsDuplicateVisitCodeException(ex))
+                {
+                    if (attempt == maxAttempts - 1)
+                    {
+                        return (false, "Mã phiếu khám bị trùng sau nhiều lần thử.");
+                    }
+                }
+            }
+
+            return (false, "Không thể tạo mã phiếu khám duy nhất.");
+        }
+
+        private async Task<string> GenerateNextVisitCodeAsync(CancellationToken cancellationToken)
+        {
+            var codes = await _context.HealthVisits
+                .AsNoTracking()
+                .Where(x => x.Code.StartsWith("VIS"))
+                .Select(x => x.Code)
+                .ToListAsync(cancellationToken);
+
+            var max = 0;
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var code in codes)
+            {
+                if (string.IsNullOrWhiteSpace(code))
+                {
+                    continue;
+                }
+
+                existing.Add(code);
+
+                if (code.Length <= 3)
+                {
+                    continue;
+                }
+
+                if (int.TryParse(code[3..], out var value))
+                {
+                    if (value > max)
+                    {
+                        max = value;
+                    }
+                }
+            }
+
+            var next = max + 1;
+            while (true)
+            {
+                var candidate = $"VIS{next:D3}";
+                if (!existing.Contains(candidate))
+                {
+                    return candidate;
+                }
+
+                next += 1;
+            }
+        }
+
+        private static bool IsDuplicateVisitCodeException(DbUpdateException exception)
+        {
+            var message = exception.InnerException?.Message ?? exception.Message;
+            return message.Contains("IX_HealthVisits_Code", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("HealthVisits", StringComparison.OrdinalIgnoreCase)
+                && message.Contains("Code", StringComparison.OrdinalIgnoreCase)
+                && message.Contains("duplicate", StringComparison.OrdinalIgnoreCase);
         }
 
 

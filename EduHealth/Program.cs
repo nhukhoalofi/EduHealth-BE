@@ -113,6 +113,7 @@ builder.Services.AddScoped<IExaminationRepository, ExaminationRepository>();
 builder.Services.AddScoped<IExaminationService, ExaminationService>();
 
 builder.Services.AddScoped<ICatalogService, CatalogService>();
+builder.Services.AddScoped<IDiseaseService, DiseaseService>();
 
 builder.Services.AddScoped<ISystemLogRepository, SystemLogRepository>();
 builder.Services.AddScoped<ISystemLogWriter, SystemLogWriter>();
