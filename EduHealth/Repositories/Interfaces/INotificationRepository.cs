@@ -13,6 +13,12 @@ namespace EduHealth.Repositories.Interfaces
         Task<bool> RecipientExistsAsync(int userId, int notificationId, CancellationToken cancellationToken = default);
 
         Task<NotificationRecipient?> GetRecipientAsync(int userId, int notificationId, CancellationToken cancellationToken = default);
+
+        Task<(List<NotificationRecipient> Items, int Total)> GetNotificationsForUserAsync(int userId, int page, int pageSize, CancellationToken cancellationToken = default);
+        Task<int> GetUnreadCountAsync(int userId, CancellationToken cancellationToken = default);
+        Task<int> MarkAllAsReadAsync(int userId, CancellationToken cancellationToken = default);
+
         Task SaveChangesAsync(CancellationToken cancellationToken = default);
     }
 }
+

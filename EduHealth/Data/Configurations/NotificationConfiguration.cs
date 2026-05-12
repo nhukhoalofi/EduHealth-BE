@@ -22,6 +22,9 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.Content)
                 .IsRequired();
 
+            builder.Property(x => x.Image)
+                .HasMaxLength(500);
+
             builder.Property(x => x.Type)
                 .HasMaxLength(50)
                 .IsRequired();

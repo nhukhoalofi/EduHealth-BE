@@ -91,6 +91,38 @@ namespace EduHealth.Controllers
             return Ok(ApiResponse<object>.Ok(null, "Đánh dấu đã đọc thành công."));
         }
 
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> GetNotifications([FromQuery] int page = 1, [FromQuery] int pageSize = 10, CancellationToken cancellationToken = default)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ."));
+            }
+
+            var result = await _notificationService.GetNotificationsAsync(userId, page, pageSize, cancellationToken);
+
+            return Ok(ApiResponse<GetNotificationsResponseDto>.Ok(result, "Lấy danh sách thông báo thành công."));
+        }
+
+        [HttpPatch("read-all")]
+        [Authorize]
+        public async Task<IActionResult> MarkAllRead(CancellationToken cancellationToken)
+        {
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (string.IsNullOrWhiteSpace(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ."));
+            }
+
+            var count = await _notificationService.MarkAllReadAsync(userId, cancellationToken);
+
+            return Ok(ApiResponse<object>.Ok(new { markedCount = count }, "Đánh dấu tất cả đã đọc thành công."));
+        }
+
         [HttpGet("stream")]
         [Authorize]
         public async Task<IActionResult> Stream(CancellationToken cancellationToken)

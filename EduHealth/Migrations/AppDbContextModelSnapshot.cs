@@ -488,6 +488,10 @@ namespace EduHealth.Migrations
                     b.Property<int?>("DiseaseId")
                         .HasColumnType("int");
 
+                    b.Property<string>("Image")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)

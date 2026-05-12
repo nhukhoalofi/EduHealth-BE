@@ -5,6 +5,7 @@ namespace EduHealth.Data.Entities
         public int NotificationId { get; set; }
         public string Title { get; set; } = null!;
         public string Content { get; set; } = null!;
+        public string? Image { get; set; }
         public string Type { get; set; } = null!;
         public int CreatedByUserId { get; set; }
         public DateTime CreatedAt { get; set; }
