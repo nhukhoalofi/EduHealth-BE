@@ -1,6 +1,7 @@
 using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.Repositories.Interfaces;
+using EduHealth.Helpers;
 using Microsoft.EntityFrameworkCore;
 
 namespace EduHealth.Repositories.Implementations
@@ -67,6 +68,46 @@ namespace EduHealth.Repositories.Implementations
         {
             return await _context.NotificationRecipients
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.NotificationId == notificationId, cancellationToken);
+        }
+
+        public async Task<(List<NotificationRecipient> Items, int Total)> GetNotificationsForUserAsync(
+            int userId, int page, int pageSize, CancellationToken cancellationToken = default)
+        {
+            var query = _context.NotificationRecipients
+                .AsNoTracking()
+                .Include(x => x.Notification)
+                    .ThenInclude(n => n.CreatedByUser)
+                .Where(x => x.UserId == userId)
+                .OrderByDescending(x => x.Notification.CreatedAt);
+
+            var total = await query.CountAsync(cancellationToken);
+
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return (items, total);
+        }
+
+        public async Task<int> GetUnreadCountAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            return await _context.NotificationRecipients
+                .AsNoTracking()
+                .Where(x => x.UserId == userId && !x.IsRead)
+                .CountAsync(cancellationToken);
+        }
+
+        public async Task<int> MarkAllAsReadAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            var now = VietnamTimeHelper.Now;
+
+            return await _context.NotificationRecipients
+                .Where(x => x.UserId == userId && !x.IsRead)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.IsRead, true)
+                    .SetProperty(x => x.ReadAt, now),
+                    cancellationToken);
         }
 
         public async Task SaveChangesAsync(CancellationToken cancellationToken = default)

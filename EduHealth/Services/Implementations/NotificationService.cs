@@ -62,6 +62,7 @@ namespace EduHealth.Services.Implementations
             {
                 Title = request.Title.Trim(),
                 Content = request.Content.Trim(),
+                Image = request.Image?.Trim(),
                 Type = request.Type.Trim(),
                 CreatedByUserId = createdByUserId,
                 CreatedAt = VietnamTimeHelper.Now,
@@ -132,6 +133,55 @@ namespace EduHealth.Services.Implementations
             }
 
             return true;
+        }
+
+        public async Task<GetNotificationsResponseDto> GetNotificationsAsync(
+            int userId, int page, int pageSize, CancellationToken cancellationToken = default)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 10;
+            if (pageSize > 50) pageSize = 50;
+
+            var (items, total) = await _notificationRepository.GetNotificationsForUserAsync(userId, page, pageSize, cancellationToken);
+            var unreadCount = await _notificationRepository.GetUnreadCountAsync(userId, cancellationToken);
+
+            var dtoItems = items.Select(r => new NotificationItemDto
+            {
+                NotificationId = r.NotificationId,
+                Title = r.Notification.Title,
+                Content = r.Notification.Content,
+                Image = r.Notification.Image,
+                Type = r.Notification.Type,
+                CreatedAt = r.Notification.CreatedAt,
+                CreatedByUserName = r.Notification.CreatedByUser?.FullName ?? "Hệ thống",
+                ClassId = r.Notification.ClassId,
+                DiseaseId = r.Notification.DiseaseId,
+                VaccinationId = r.Notification.VaccinationId,
+                IsRead = r.IsRead,
+                ReadAt = r.ReadAt
+            }).ToList();
+
+            return new GetNotificationsResponseDto
+            {
+                Items = dtoItems,
+                Total = total,
+                Page = page,
+                PageSize = pageSize,
+                TotalPages = (int)Math.Ceiling(total / (double)pageSize),
+                UnreadCount = unreadCount
+            };
+        }
+
+        public async Task<int> MarkAllReadAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            var count = await _notificationRepository.MarkAllAsReadAsync(userId, cancellationToken);
+
+            if (count > 0)
+            {
+                _ = _sseService.BroadcastAllNotificationsReadAsync(userId, cancellationToken);
+            }
+
+            return count;
         }
 
         private async Task<List<Student>> ResolveRecipientsAsync(
