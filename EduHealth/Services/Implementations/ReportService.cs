@@ -5,6 +5,7 @@ using EduHealth.Helpers;
 using EduHealth.DTOs.Reports;
 using EduHealth.DTOs.Dashboard;
 using EduHealth.Services.Interfaces;
+using EduHealth.Services.Models;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -15,10 +16,12 @@ namespace EduHealth.Services.Implementations
     public sealed class ReportService : IReportService
     {
         private readonly AppDbContext _context;
+        private readonly INotificationTargetResolver _notificationTargetResolver;
 
-        public ReportService(AppDbContext context)
+        public ReportService(AppDbContext context, INotificationTargetResolver notificationTargetResolver)
         {
             _context = context;
+            _notificationTargetResolver = notificationTargetResolver;
         }
 
         public async Task<AdminReportDashboardDto> GetAdminDashboardAsync(CancellationToken cancellationToken)
@@ -235,26 +238,28 @@ namespace EduHealth.Services.Implementations
                     .Select(u => u.UserId)
                     .FirstOrDefaultAsync(cancellationToken);
 
-            var recipientIds = new HashSet<int>();
+            var targetMode = _notificationTargetResolver.ResolveTargetMode(
+                targetMode: null,
+                classId: request.ClassId,
+                recipientUserIds: request.RecipientUserIds,
+                targetRoles: null);
 
-            if (request.ClassId.HasValue)
+            var recipients = targetMode == "NONE"
+                ? new List<User>()
+                : await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
+                {
+                    TargetMode = targetMode,
+                    ClassId = request.ClassId,
+                    RecipientUserIds = request.RecipientUserIds
+                }, cancellationToken);
+
+            if (targetMode == "NONE" || (targetMode == "CLASS" && recipients.Count == 0))
             {
-                var studentIds = await _context.Students.AsNoTracking()
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in studentIds) recipientIds.Add(id);
-            }
-
-            if (recipientIds.Count == 0)
-            {
-                var nurseIds = await _context.Users.AsNoTracking()
-                    .Where(u => u.Role == "NURSE" && u.IsActive)
-                    .Select(u => u.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in nurseIds) recipientIds.Add(id);
+                recipients = await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
+                {
+                    TargetMode = "ROLES",
+                    TargetRoles = new[] { "NURSE" }
+                }, cancellationToken);
             }
 
             var now = VietnamTimeHelper.Now;
@@ -263,12 +268,15 @@ namespace EduHealth.Services.Implementations
                 Title = request.Title,
                 Content = request.Content,
                 Type = "DIRECTIVE",
+                Visibility = "INTERNAL",
+                Status = "PUBLISHED",
                 CreatedByUserId = createdBy,
                 CreatedAt = now,
+                PublishedAt = now,
                 ClassId = request.ClassId
             };
 
-            foreach (var userId in recipientIds)
+            foreach (var userId in recipients.Select(x => x.UserId))
             {
                 notification.Recipients.Add(new NotificationRecipient
                 {
@@ -306,74 +314,62 @@ namespace EduHealth.Services.Implementations
 
         public async Task<AdminNotificationPreviewResponseDto> PreviewNotificationsAsync(AdminNotificationPreviewRequestDto request, CancellationToken cancellationToken)
         {
-            var recipients = new List<NotificationRecipientPreviewDto>();
+            var recipients = await _notificationTargetResolver.ResolvePreviewRecipientsAsync(
+                request.ClassId,
+                request.RecipientUserIds,
+                cancellationToken);
 
-            if (request.ClassId.HasValue)
-            {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                var users = await _context.Users
-                    .Where(u => studentUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                var users = await _context.Users
-                    .Where(u => request.RecipientUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
-            }
+            var previewRecipients = recipients
+                .Select(u => new NotificationRecipientPreviewDto
+                {
+                    UserId = u.UserId,
+                    FullName = u.FullName,
+                    Role = u.Role
+                })
+                .ToList();
 
             return new AdminNotificationPreviewResponseDto
             {
-                TotalRecipients = recipients.Count,
-                Recipients = recipients
+                TotalRecipients = previewRecipients.Count,
+                Recipients = previewRecipients
             };
         }
 
         public async Task<AdminNotificationResponseDto> SendNotificationsAsync(AdminNotificationRequestDto request, int adminId, CancellationToken cancellationToken)
         {
-            var userIdsToNotify = new HashSet<int>();
-
-            if (request.ClassId.HasValue)
+            var now = VietnamTimeHelper.Now;
+            var targetMode = _notificationTargetResolver.ResolveTargetMode(
+                targetMode: null,
+                classId: request.ClassId,
+                recipientUserIds: request.RecipientUserIds,
+                targetRoles: null);
+            var recipients = await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
             {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in studentUserIds) userIdsToNotify.Add(id);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                foreach (var id in request.RecipientUserIds) userIdsToNotify.Add(id);
-            }
+                TargetMode = targetMode,
+                ClassId = request.ClassId,
+                RecipientUserIds = request.RecipientUserIds
+            }, cancellationToken);
 
             var notification = new Notification
             {
                 Title = request.Title,
                 Content = request.Content,
                 Type = request.Type,
+                Visibility = "INTERNAL",
+                Status = "PUBLISHED",
                 CreatedByUserId = adminId,
-                CreatedAt = VietnamTimeHelper.Now,
+                CreatedAt = now,
+                PublishedAt = now,
                 ClassId = request.ClassId
             };
 
-            foreach (var userId in userIdsToNotify)
+            foreach (var userId in recipients.Select(x => x.UserId))
             {
                 notification.Recipients.Add(new NotificationRecipient
                 {
                     UserId = userId,
                     IsRead = false,
-                    SentAt = VietnamTimeHelper.Now,
+                    SentAt = now,
                     Status = "SENT"
                 });
             }

@@ -103,6 +103,7 @@ builder.Services.AddScoped<IStudentHealthService, StudentHealthService>();
 builder.Services.AddScoped<IVaccinationService, VaccinationService>();
 
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<INotificationTargetResolver, NotificationTargetResolver>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddSingleton<ISseNotificationService, SseNotificationService>();
 

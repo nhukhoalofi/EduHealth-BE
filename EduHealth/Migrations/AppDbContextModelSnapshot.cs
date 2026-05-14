@@ -492,6 +492,16 @@ namespace EduHealth.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("PUBLISHED");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -505,6 +515,13 @@ namespace EduHealth.Migrations
                     b.Property<int?>("VaccinationId")
                         .HasColumnType("int");
 
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("INTERNAL");
+
                     b.HasKey("NotificationId");
 
                     b.HasIndex("ClassId");
@@ -515,7 +532,12 @@ namespace EduHealth.Migrations
 
                     b.HasIndex("VaccinationId");
 
-                    b.ToTable("Notifications", (string)null);
+                    b.ToTable("Notifications", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Notifications_Status", "[Status] IN ('DRAFT', 'PUBLISHED')");
+
+                            t.HasCheckConstraint("CK_Notifications_Visibility", "[Visibility] IN ('INTERNAL', 'PUBLIC', 'BOTH')");
+                        });
                 });
 
             modelBuilder.Entity("EduHealth.Data.Entities.NotificationRecipient", b =>

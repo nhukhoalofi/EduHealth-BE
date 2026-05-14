@@ -7,8 +7,11 @@ namespace EduHealth.Data.Entities
         public string Content { get; set; } = null!;
         public string? Image { get; set; }
         public string Type { get; set; } = null!;
+        public string Visibility { get; set; } = "INTERNAL";
+        public string Status { get; set; } = "PUBLISHED";
         public int CreatedByUserId { get; set; }
         public DateTime CreatedAt { get; set; }
+        public DateTime? PublishedAt { get; set; }
 
         public int? ClassId { get; set; }
         public int? DiseaseId { get; set; }
