@@ -4,6 +4,7 @@ namespace EduHealth.DTOs.Examinations
     {
         public string StudentId { get; set; } = null!;
         public DateTime VisitDate { get; set; }
+        public int? DiseaseId { get; set; }
         public string? DiseaseTypeId { get; set; }
         public string Symptoms { get; set; } = null!;
         public string Diagnosis { get; set; } = null!;

@@ -16,6 +16,7 @@ namespace EduHealth.Repositories.Interfaces
 
         Task<HealthVisit?> GetByIdAsync(int visitId, CancellationToken cancellationToken = default);
         Task<Student?> GetStudentByCodeAsync(string studentCode, CancellationToken cancellationToken = default);
+        Task<DiseaseType?> GetDiseaseTypeByIdAsync(int diseaseId, CancellationToken cancellationToken = default);
         Task<DiseaseType?> GetDiseaseTypeByCodeAsync(string diseaseCode, CancellationToken cancellationToken = default);
         Task<HealthVisit?> GetByCodeAsync(string visitCode, CancellationToken cancellationToken = default);
 

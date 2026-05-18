@@ -106,6 +106,12 @@ namespace EduHealth.Repositories.Implementations
                 .FirstOrDefaultAsync(x => x.Code == studentCode, cancellationToken);
         }
 
+        public async Task<DiseaseType?> GetDiseaseTypeByIdAsync(int diseaseId, CancellationToken cancellationToken = default)
+        {
+            return await _context.DiseaseTypes
+                .FirstOrDefaultAsync(x => x.DiseaseId == diseaseId, cancellationToken);
+        }
+
         public async Task<DiseaseType?> GetDiseaseTypeByCodeAsync(string diseaseCode, CancellationToken cancellationToken = default)
         {
             return await _context.DiseaseTypes

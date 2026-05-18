@@ -1,8 +1,10 @@
 using EduHealth.DTOs.Common;
 using EduHealth.DTOs.Messaging;
+using EduHealth.Hubs;
 using EduHealth.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
 
 namespace EduHealth.Controllers
@@ -13,10 +15,12 @@ namespace EduHealth.Controllers
     public class MessagingController : ControllerBase
     {
         private readonly IMessagingService _messagingService;
+        private readonly IHubContext<ChatHub> _chatHubContext;
 
-        public MessagingController(IMessagingService messagingService)
+        public MessagingController(IMessagingService messagingService, IHubContext<ChatHub> chatHubContext)
         {
             _messagingService = messagingService;
+            _chatHubContext = chatHubContext;
         }
 
         [HttpGet("conversations")]
@@ -112,10 +116,30 @@ namespace EduHealth.Controllers
                 return Unauthorized(ApiResponse<object>.Fail("Token không hợp lệ."));
             }
 
-            var (success, error, data, _) = await _messagingService.SendMessageAsync(userId, conversationId, request, cancellationToken);
+            var (success, error, data, updates) = await _messagingService.SendMessageAsync(userId, conversationId, request, cancellationToken);
             if (!success)
             {
                 return MapMessagingError(error);
+            }
+
+            if (data is not null)
+            {
+                if (updates.Count > 0)
+                {
+                    await _chatHubContext.Clients.Users(updates.Keys.Select(x => x.ToString()))
+                        .SendAsync("MessageCreated", data, cancellationToken);
+                }
+                else
+                {
+                    await _chatHubContext.Clients.Group(ChatHub.BuildConversationGroup(conversationId))
+                        .SendAsync("MessageCreated", data, cancellationToken);
+                }
+
+                foreach (var update in updates)
+                {
+                    await _chatHubContext.Clients.User(update.Key.ToString())
+                        .SendAsync("ConversationUpdated", update.Value, cancellationToken);
+                }
             }
 
             return Ok(ApiResponse<MessageItemDto>.Ok(data, "Gửi tin nhắn thành công."));

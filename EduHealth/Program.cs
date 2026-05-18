@@ -103,6 +103,7 @@ builder.Services.AddScoped<IStudentHealthService, StudentHealthService>();
 builder.Services.AddScoped<IVaccinationService, VaccinationService>();
 
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<INotificationTargetResolver, NotificationTargetResolver>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddSingleton<ISseNotificationService, SseNotificationService>();
 
@@ -113,6 +114,7 @@ builder.Services.AddScoped<IExaminationRepository, ExaminationRepository>();
 builder.Services.AddScoped<IExaminationService, ExaminationService>();
 
 builder.Services.AddScoped<ICatalogService, CatalogService>();
+builder.Services.AddScoped<IDiseaseService, DiseaseService>();
 
 builder.Services.AddScoped<ISystemLogRepository, SystemLogRepository>();
 builder.Services.AddScoped<ISystemLogWriter, SystemLogWriter>();

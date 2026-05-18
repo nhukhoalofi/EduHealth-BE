@@ -971,8 +971,11 @@ namespace EduHealth.Data.Seeders
                 Title = "Thông báo kiểm tra sức khỏe",
                 Content = "Nhà trường tổ chức kiểm tra sức khỏe định kỳ.",
                 Type = "GENERAL",
+                Visibility = "INTERNAL",
+                Status = "PUBLISHED",
                 CreatedByUserId = admin.UserId,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                PublishedAt = DateTime.UtcNow
             };
 
             context.Notifications.Add(noti);

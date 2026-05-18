@@ -8,7 +8,11 @@ namespace EduHealth.Data.Configurations
     {
         public void Configure(EntityTypeBuilder<Notification> builder)
         {
-            builder.ToTable("Notifications");
+            builder.ToTable("Notifications", table =>
+            {
+                table.HasCheckConstraint("CK_Notifications_Visibility", "[Visibility] IN ('INTERNAL', 'PUBLIC', 'BOTH')");
+                table.HasCheckConstraint("CK_Notifications_Status", "[Status] IN ('DRAFT', 'PUBLISHED')");
+            });
 
             builder.HasKey(x => x.NotificationId);
 
@@ -22,13 +26,29 @@ namespace EduHealth.Data.Configurations
             builder.Property(x => x.Content)
                 .IsRequired();
 
+            builder.Property(x => x.Image)
+                .HasMaxLength(500);
+
             builder.Property(x => x.Type)
                 .HasMaxLength(50)
+                .IsRequired();
+
+            builder.Property(x => x.Visibility)
+                .HasMaxLength(20)
+                .HasDefaultValue("INTERNAL")
+                .IsRequired();
+
+            builder.Property(x => x.Status)
+                .HasMaxLength(20)
+                .HasDefaultValue("PUBLISHED")
                 .IsRequired();
 
             builder.Property(x => x.CreatedAt)
                 .HasColumnType("datetime")
                 .IsRequired();
+
+            builder.Property(x => x.PublishedAt)
+                .HasColumnType("datetime");
 
             builder.HasOne(x => x.CreatedByUser)
                 .WithMany()

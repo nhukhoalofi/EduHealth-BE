@@ -5,6 +5,7 @@ using EduHealth.Helpers;
 using EduHealth.DTOs.Reports;
 using EduHealth.DTOs.Dashboard;
 using EduHealth.Services.Interfaces;
+using EduHealth.Services.Models;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -15,10 +16,12 @@ namespace EduHealth.Services.Implementations
     public sealed class ReportService : IReportService
     {
         private readonly AppDbContext _context;
+        private readonly INotificationTargetResolver _notificationTargetResolver;
 
-        public ReportService(AppDbContext context)
+        public ReportService(AppDbContext context, INotificationTargetResolver notificationTargetResolver)
         {
             _context = context;
+            _notificationTargetResolver = notificationTargetResolver;
         }
 
         public async Task<AdminReportDashboardDto> GetAdminDashboardAsync(CancellationToken cancellationToken)
@@ -235,26 +238,28 @@ namespace EduHealth.Services.Implementations
                     .Select(u => u.UserId)
                     .FirstOrDefaultAsync(cancellationToken);
 
-            var recipientIds = new HashSet<int>();
+            var targetMode = _notificationTargetResolver.ResolveTargetMode(
+                targetMode: null,
+                classId: request.ClassId,
+                recipientUserIds: request.RecipientUserIds,
+                targetRoles: null);
 
-            if (request.ClassId.HasValue)
+            var recipients = targetMode == "NONE"
+                ? new List<User>()
+                : await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
+                {
+                    TargetMode = targetMode,
+                    ClassId = request.ClassId,
+                    RecipientUserIds = request.RecipientUserIds
+                }, cancellationToken);
+
+            if (targetMode == "NONE" || (targetMode == "CLASS" && recipients.Count == 0))
             {
-                var studentIds = await _context.Students.AsNoTracking()
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in studentIds) recipientIds.Add(id);
-            }
-
-            if (recipientIds.Count == 0)
-            {
-                var nurseIds = await _context.Users.AsNoTracking()
-                    .Where(u => u.Role == "NURSE" && u.IsActive)
-                    .Select(u => u.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in nurseIds) recipientIds.Add(id);
+                recipients = await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
+                {
+                    TargetMode = "ROLES",
+                    TargetRoles = new[] { "NURSE" }
+                }, cancellationToken);
             }
 
             var now = VietnamTimeHelper.Now;
@@ -263,12 +268,15 @@ namespace EduHealth.Services.Implementations
                 Title = request.Title,
                 Content = request.Content,
                 Type = "DIRECTIVE",
+                Visibility = "INTERNAL",
+                Status = "PUBLISHED",
                 CreatedByUserId = createdBy,
                 CreatedAt = now,
+                PublishedAt = now,
                 ClassId = request.ClassId
             };
 
-            foreach (var userId in recipientIds)
+            foreach (var userId in recipients.Select(x => x.UserId))
             {
                 notification.Recipients.Add(new NotificationRecipient
                 {
@@ -306,74 +314,62 @@ namespace EduHealth.Services.Implementations
 
         public async Task<AdminNotificationPreviewResponseDto> PreviewNotificationsAsync(AdminNotificationPreviewRequestDto request, CancellationToken cancellationToken)
         {
-            var recipients = new List<NotificationRecipientPreviewDto>();
+            var recipients = await _notificationTargetResolver.ResolvePreviewRecipientsAsync(
+                request.ClassId,
+                request.RecipientUserIds,
+                cancellationToken);
 
-            if (request.ClassId.HasValue)
-            {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                var users = await _context.Users
-                    .Where(u => studentUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                var users = await _context.Users
-                    .Where(u => request.RecipientUserIds.Contains(u.UserId))
-                    .Select(u => new NotificationRecipientPreviewDto { UserId = u.UserId, FullName = u.FullName, Role = u.Role })
-                    .ToListAsync(cancellationToken);
-
-                recipients.AddRange(users);
-            }
+            var previewRecipients = recipients
+                .Select(u => new NotificationRecipientPreviewDto
+                {
+                    UserId = u.UserId,
+                    FullName = u.FullName,
+                    Role = u.Role
+                })
+                .ToList();
 
             return new AdminNotificationPreviewResponseDto
             {
-                TotalRecipients = recipients.Count,
-                Recipients = recipients
+                TotalRecipients = previewRecipients.Count,
+                Recipients = previewRecipients
             };
         }
 
         public async Task<AdminNotificationResponseDto> SendNotificationsAsync(AdminNotificationRequestDto request, int adminId, CancellationToken cancellationToken)
         {
-            var userIdsToNotify = new HashSet<int>();
-
-            if (request.ClassId.HasValue)
+            var now = VietnamTimeHelper.Now;
+            var targetMode = _notificationTargetResolver.ResolveTargetMode(
+                targetMode: null,
+                classId: request.ClassId,
+                recipientUserIds: request.RecipientUserIds,
+                targetRoles: null);
+            var recipients = await _notificationTargetResolver.ResolveRecipientsAsync(new NotificationTargetResolveRequest
             {
-                var studentUserIds = await _context.Students
-                    .Where(s => s.ClassId == request.ClassId.Value)
-                    .Select(s => s.UserId)
-                    .ToListAsync(cancellationToken);
-
-                foreach (var id in studentUserIds) userIdsToNotify.Add(id);
-            }
-            else if (request.RecipientUserIds != null && request.RecipientUserIds.Any())
-            {
-                foreach (var id in request.RecipientUserIds) userIdsToNotify.Add(id);
-            }
+                TargetMode = targetMode,
+                ClassId = request.ClassId,
+                RecipientUserIds = request.RecipientUserIds
+            }, cancellationToken);
 
             var notification = new Notification
             {
                 Title = request.Title,
                 Content = request.Content,
                 Type = request.Type,
+                Visibility = "INTERNAL",
+                Status = "PUBLISHED",
                 CreatedByUserId = adminId,
-                CreatedAt = VietnamTimeHelper.Now,
+                CreatedAt = now,
+                PublishedAt = now,
                 ClassId = request.ClassId
             };
 
-            foreach (var userId in userIdsToNotify)
+            foreach (var userId in recipients.Select(x => x.UserId))
             {
                 notification.Recipients.Add(new NotificationRecipient
                 {
                     UserId = userId,
                     IsRead = false,
-                    SentAt = VietnamTimeHelper.Now,
+                    SentAt = now,
                     Status = "SENT"
                 });
             }
@@ -633,66 +629,11 @@ namespace EduHealth.Services.Implementations
 
             if (format == "pdf")
             {
-                QuestPDF.Settings.License = LicenseType.Community;
-                var document = Document.Create(container =>
-                {
-                    container.Page(page =>
-                    {
-                        page.Size(PageSizes.A4);
-                        page.Margin(24);
-                        page.DefaultTextStyle(x => x.FontSize(11).FontFamily("Arial"));
-
-                        page.Header().Column(col =>
-                        {
-                            col.Item().Text("Báo cáo y tế tổng hợp").Bold().FontSize(16);
-                            col.Item().Text($"Thời gian xuất: {generatedAtVietnam:dd/MM/yyyy HH:mm:ss}");
-                        });
-
-                        page.Content().Column(col =>
-                        {
-                            col.Spacing(8);
-                            col.Item().Text($"Bộ lọc: {dashboard.AppliedFilters.TimeRange} / {dashboard.AppliedFilters.ReportType}");
-                            col.Item().Table(table =>
-                            {
-                                table.ColumnsDefinition(c =>
-                                {
-                                    c.RelativeColumn(1);
-                                    c.RelativeColumn(2);
-                                    c.RelativeColumn(1);
-                                    c.RelativeColumn(1);
-                                    c.RelativeColumn(1);
-                                    c.RelativeColumn(1.5f);
-                                });
-
-                                table.Header(h =>
-                                {
-                                    h.Cell().Text("ID").Bold();
-                                    h.Cell().Text("Lớp").Bold();
-                                    h.Cell().Text("Sĩ số").Bold();
-                                    h.Cell().Text("Khám").Bold();
-                                    h.Cell().Text("Theo dõi").Bold();
-                                    h.Cell().Text("Tỷ lệ tiêm").Bold();
-                                });
-
-                                foreach (var row in dashboard.ClassRows)
-                                {
-                                    table.Cell().Text(row.Id);
-                                    table.Cell().Text(row.ClassName);
-                                    table.Cell().Text(row.StudentCount.ToString());
-                                    table.Cell().Text(row.ExaminationCount.ToString());
-                                    table.Cell().Text(row.TrackingCount.ToString());
-                                    table.Cell().Text($"{row.VaccinationRate}%");
-                                }
-                            });
-                        });
-                    });
-                });
-
                 return new ExportFileDto
                 {
                     FileName = $"NurseReport_{generatedAtVietnam:yyyyMMdd_HHmmss}.pdf",
                     ContentType = "application/pdf",
-                    FileBytes = document.GeneratePdf()
+                    FileBytes = BuildNurseReportPdfBytes(dashboard, request)
                 };
             }
 
@@ -1119,6 +1060,423 @@ namespace EduHealth.Services.Implementations
             });
 
             return document.GeneratePdf();
+        }
+
+        private static byte[] BuildNurseReportPdfBytes(NurseReportDashboardDto dashboard, NurseReportExportRequestDto request)
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+
+            var generatedAtVietnam = dashboard.GeneratedAt;
+            var classRows = dashboard.ClassRows ?? new List<NurseClassRowDto>();
+            var trendRows = dashboard.Trend ?? new List<NurseTrendDto>();
+            var diseaseRows = dashboard.DiseaseBreakdown ?? new List<NurseDiseaseBreakdownDto>();
+            var medicineRows = dashboard.TopMedicines ?? new List<NurseTopMedicineDto>();
+            var alertRows = dashboard.RiskAlerts ?? new List<NurseRiskAlertDto>();
+
+            var totalStudents = classRows.Sum(x => x.StudentCount);
+            var totalExaminations = classRows.Sum(x => x.ExaminationCount);
+            var totalTracking = classRows.Sum(x => x.TrackingCount);
+            var totalMedicines = classRows.Sum(x => x.MedicineDispenseCount);
+            var averageVaccinationRate = classRows.Count == 0
+                ? 0
+                : (int)Math.Round(classRows.Average(x => x.VaccinationRate));
+            var totalDiseaseCases = diseaseRows.Sum(x => x.Count);
+
+            var document = Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(24);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+
+                    page.Header().Column(col =>
+                    {
+                        col.Spacing(4);
+                        col.Item().Text("Báo cáo y tế tổng hợp").Bold().FontSize(16);
+                        col.Item().Text(dashboard.Header.Description).FontSize(10);
+                        col.Item().Text($"Thời gian xuất: {generatedAtVietnam:dd/MM/yyyy HH:mm:ss}").FontSize(9);
+                    });
+
+                    page.Content().Column(col =>
+                    {
+                        col.Spacing(10);
+
+                        col.Item().Element(section =>
+                        {
+                            section.Column(sectionCol =>
+                            {
+                                sectionCol.Spacing(4);
+                                sectionCol.Item().Text("Thông tin báo cáo").Bold().FontSize(13);
+                                sectionCol.Item().Text($"Thời gian áp dụng: {BuildNurseReportPeriodLabel(request)}");
+                                sectionCol.Item().Text($"Bộ lọc: {BuildNurseFilterSummaryLabel(dashboard)}");
+                            });
+                        });
+
+                        col.Item().Element(section =>
+                        {
+                            section.Column(sectionCol =>
+                            {
+                                sectionCol.Spacing(5);
+                                sectionCol.Item().Text("Tổng quan").Bold().FontSize(13);
+                                sectionCol.Item().Table(table =>
+                                {
+                                    table.ColumnsDefinition(columns =>
+                                    {
+                                        columns.RelativeColumn();
+                                        columns.RelativeColumn();
+                                        columns.RelativeColumn();
+                                        columns.RelativeColumn();
+                                        columns.RelativeColumn();
+                                    });
+
+                                    table.Header(header =>
+                                    {
+                                        PdfHeaderCell(header.Cell(), "Học sinh");
+                                        PdfHeaderCell(header.Cell(), "Lượt khám");
+                                        PdfHeaderCell(header.Cell(), "Theo dõi");
+                                        PdfHeaderCell(header.Cell(), "Thuốc cấp");
+                                        PdfHeaderCell(header.Cell(), "Tỷ lệ tiêm TB");
+                                    });
+
+                                    PdfBodyCell(table.Cell(), totalStudents.ToString());
+                                    PdfBodyCell(table.Cell(), totalExaminations.ToString());
+                                    PdfBodyCell(table.Cell(), totalTracking.ToString());
+                                    PdfBodyCell(table.Cell(), totalMedicines.ToString());
+                                    PdfBodyCell(table.Cell(), $"{averageVaccinationRate}%");
+                                });
+                            });
+                        });
+
+                        col.Item().Element(section =>
+                        {
+                            section.Column(sectionCol =>
+                            {
+                                sectionCol.Spacing(5);
+                                sectionCol.Item().Text("Xu hướng lượt khám").Bold().FontSize(13);
+
+                                if (trendRows.Count == 0)
+                                {
+                                    sectionCol.Item().Element(x => PdfEmptyBlock(x, "Chưa có dữ liệu xu hướng cho bộ lọc hiện tại."));
+                                    return;
+                                }
+
+                                sectionCol.Item().Table(table =>
+                                {
+                                    table.ColumnsDefinition(columns =>
+                                    {
+                                        columns.RelativeColumn(2);
+                                        columns.RelativeColumn(1);
+                                    });
+
+                                    table.Header(header =>
+                                    {
+                                        PdfHeaderCell(header.Cell(), "Mốc thời gian");
+                                        PdfHeaderCell(header.Cell(), "Lượt khám");
+                                    });
+
+                                    foreach (var row in trendRows)
+                                    {
+                                        PdfBodyCell(table.Cell(), row.Label);
+                                        PdfBodyCell(table.Cell(), row.Value.ToString());
+                                    }
+                                });
+                            });
+                        });
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().PaddingRight(5).Element(section =>
+                            {
+                                section.Column(sectionCol =>
+                                {
+                                    sectionCol.Spacing(5);
+                                    sectionCol.Item().Text("Phân bố nhóm bệnh").Bold().FontSize(13);
+                                    sectionCol.Item().Text($"Tổng số ca: {totalDiseaseCases}");
+
+                                    if (diseaseRows.Count == 0)
+                                    {
+                                        sectionCol.Item().Element(x => PdfEmptyBlock(x, "Chưa ghi nhận dữ liệu bệnh lý."));
+                                        return;
+                                    }
+
+                                    sectionCol.Item().Table(table =>
+                                    {
+                                        table.ColumnsDefinition(columns =>
+                                        {
+                                            columns.RelativeColumn(2);
+                                            columns.RelativeColumn(1);
+                                            columns.RelativeColumn(1);
+                                        });
+
+                                        table.Header(header =>
+                                        {
+                                            PdfHeaderCell(header.Cell(), "Nhóm bệnh");
+                                            PdfHeaderCell(header.Cell(), "Số ca");
+                                            PdfHeaderCell(header.Cell(), "Tỷ lệ");
+                                        });
+
+                                        foreach (var row in diseaseRows.OrderByDescending(x => x.Count))
+                                        {
+                                            var ratio = totalDiseaseCases == 0
+                                                ? 0
+                                                : (int)Math.Round(row.Count * 100.0 / totalDiseaseCases);
+
+                                            PdfBodyCell(table.Cell(), row.Label);
+                                            PdfBodyCell(table.Cell(), row.Count.ToString());
+                                            PdfBodyCell(table.Cell(), $"{ratio}%");
+                                        }
+                                    });
+                                });
+                            });
+
+                            row.RelativeItem().PaddingLeft(5).Element(section =>
+                            {
+                                section.Column(sectionCol =>
+                                {
+                                    sectionCol.Spacing(5);
+                                    sectionCol.Item().Text("Nhóm thuốc sử dụng nhiều").Bold().FontSize(13);
+
+                                    if (medicineRows.Count == 0)
+                                    {
+                                        sectionCol.Item().Element(x => PdfEmptyBlock(x, "Chưa có dữ liệu cấp phát thuốc."));
+                                        return;
+                                    }
+
+                                    sectionCol.Item().Table(table =>
+                                    {
+                                        table.ColumnsDefinition(columns =>
+                                        {
+                                            columns.RelativeColumn(2);
+                                            columns.RelativeColumn(1);
+                                            columns.RelativeColumn(1);
+                                        });
+
+                                        table.Header(header =>
+                                        {
+                                            PdfHeaderCell(header.Cell(), "Thuốc");
+                                            PdfHeaderCell(header.Cell(), "Số lượng");
+                                            PdfHeaderCell(header.Cell(), "Tồn kho");
+                                        });
+
+                                        foreach (var row in medicineRows)
+                                        {
+                                            PdfBodyCell(table.Cell(), row.Name);
+                                            PdfBodyCell(table.Cell(), row.UsedQuantity.ToString());
+                                            PdfBodyCell(table.Cell(), ResolveNurseStockStatusLabel(row.StockStatus));
+                                        }
+                                    });
+                                });
+                            });
+                        });
+
+                        col.Item().Element(section =>
+                        {
+                            section.Column(sectionCol =>
+                            {
+                                sectionCol.Spacing(5);
+                                sectionCol.Item().Text("Cảnh báo").Bold().FontSize(13);
+
+                                if (alertRows.Count == 0)
+                                {
+                                    sectionCol.Item().Element(x => PdfEmptyBlock(x, "Chưa có cảnh báo cần xử lý."));
+                                    return;
+                                }
+
+                                foreach (var alert in alertRows)
+                                {
+                                    sectionCol.Item()
+                                        .Border(0.5f)
+                                        .BorderColor(Colors.Grey.Lighten2)
+                                        .Padding(6)
+                                        .Column(alertCol =>
+                                        {
+                                            alertCol.Spacing(2);
+                                            alertCol.Item().Text($"{alert.Title} - {ResolveNurseAlertToneLabel(alert.Tone)}").Bold();
+                                            alertCol.Item().Text(alert.Message);
+                                            alertCol.Item().Text($"Cập nhật: {alert.TimeLabel}").FontSize(9);
+                                        });
+                                }
+                            });
+                        });
+
+                        col.Item().Element(section =>
+                        {
+                            section.Column(sectionCol =>
+                            {
+                                sectionCol.Spacing(5);
+                                sectionCol.Item().Text("Theo dõi theo lớp học").Bold().FontSize(13);
+
+                                if (classRows.Count == 0)
+                                {
+                                    sectionCol.Item().Element(x => PdfEmptyBlock(x, "Không có dữ liệu lớp học phù hợp."));
+                                    return;
+                                }
+
+                                sectionCol.Item().Table(table =>
+                                {
+                                    table.ColumnsDefinition(columns =>
+                                    {
+                                        columns.RelativeColumn(1.4f);
+                                        columns.RelativeColumn(1);
+                                        columns.RelativeColumn(1);
+                                        columns.RelativeColumn(1);
+                                        columns.RelativeColumn(1);
+                                        columns.RelativeColumn(1.2f);
+                                        columns.RelativeColumn(1.1f);
+                                    });
+
+                                    table.Header(header =>
+                                    {
+                                        PdfHeaderCell(header.Cell(), "Lớp");
+                                        PdfHeaderCell(header.Cell(), "Sĩ số");
+                                        PdfHeaderCell(header.Cell(), "Khám");
+                                        PdfHeaderCell(header.Cell(), "Theo dõi");
+                                        PdfHeaderCell(header.Cell(), "Thuốc cấp");
+                                        PdfHeaderCell(header.Cell(), "Tỷ lệ tiêm");
+                                        PdfHeaderCell(header.Cell(), "Trạng thái");
+                                    });
+
+                                    foreach (var row in classRows)
+                                    {
+                                        PdfBodyCell(table.Cell(), row.ClassName);
+                                        PdfBodyCell(table.Cell(), row.StudentCount.ToString());
+                                        PdfBodyCell(table.Cell(), row.ExaminationCount.ToString());
+                                        PdfBodyCell(table.Cell(), row.TrackingCount.ToString());
+                                        PdfBodyCell(table.Cell(), row.MedicineDispenseCount.ToString());
+                                        PdfBodyCell(table.Cell(), $"{row.VaccinationRate}%");
+                                        PdfBodyCell(table.Cell(), ResolveNurseClassStatusLabel(row.Status));
+                                    }
+                                });
+                            });
+                        });
+                    });
+
+                    page.Footer()
+                        .AlignRight()
+                        .Text(x =>
+                        {
+                            x.Span("Trang ");
+                            x.CurrentPageNumber();
+                            x.Span(" / ");
+                            x.TotalPages();
+                        });
+                });
+            });
+
+            return document.GeneratePdf();
+        }
+
+        private static void PdfHeaderCell(IContainer cell, string text)
+        {
+            cell
+                .Background(Colors.Grey.Lighten3)
+                .BorderBottom(0.5f)
+                .BorderColor(Colors.Grey.Lighten1)
+                .Padding(5)
+                .Text(text)
+                .Bold();
+        }
+
+        private static void PdfBodyCell(IContainer cell, string text)
+        {
+            cell
+                .BorderBottom(0.5f)
+                .BorderColor(Colors.Grey.Lighten3)
+                .Padding(5)
+                .Text(string.IsNullOrWhiteSpace(text) ? "--" : text);
+        }
+
+        private static void PdfEmptyBlock(IContainer container, string message)
+        {
+            container
+                .Border(0.5f)
+                .BorderColor(Colors.Grey.Lighten2)
+                .Background(Colors.Grey.Lighten4)
+                .Padding(7)
+                .Text(message);
+        }
+
+        private static string BuildNurseFilterSummaryLabel(NurseReportDashboardDto dashboard)
+        {
+            var filters = dashboard.AppliedFilters;
+            return $"{ResolveNurseTimeRangeLabel(filters.TimeRange)}, {ResolveNurseReportTypeLabel(filters.ReportType)}, {ResolveNurseGradeLabel(filters.Grade)}, {ResolveNurseClassLabel(filters.ClassId, dashboard.FilterOptions.ClassOptions)}";
+        }
+
+        private static string BuildNurseReportPeriodLabel(NurseReportExportRequestDto request)
+        {
+            var normalizedTimeRange = NormalizeTimeRange(request.TimeRange);
+            var (from, toExclusive) = ResolveDateRange(normalizedTimeRange, request.FromDate, request.ToDate);
+            var toInclusive = toExclusive.AddSeconds(-1);
+
+            return $"{from:dd/MM/yyyy HH:mm} - {toInclusive:dd/MM/yyyy HH:mm}";
+        }
+
+        private static string ResolveNurseTimeRangeLabel(string? value)
+        {
+            return NormalizeTimeRange(value) switch
+            {
+                "this-week" => "Tuần này",
+                "this-quarter" => "Quý này",
+                "custom-range" => "Tùy chọn",
+                _ => "Tháng này"
+            };
+        }
+
+        private static string ResolveNurseReportTypeLabel(string? value)
+        {
+            return NormalizeReportType(value) switch
+            {
+                "health" => "Khám bệnh",
+                "vaccination" => "Tiêm chủng",
+                "medicine" => "Cấp thuốc",
+                _ => "Tổng hợp"
+            };
+        }
+
+        private static string ResolveNurseGradeLabel(string? value)
+        {
+            return string.IsNullOrWhiteSpace(value) || string.Equals(value, "all", StringComparison.OrdinalIgnoreCase)
+                ? "Tất cả khối"
+                : $"Khối {value.Trim()}";
+        }
+
+        private static string ResolveNurseClassLabel(string? value, IReadOnlyCollection<NurseClassOptionDto>? options)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.Equals(value, "all", StringComparison.OrdinalIgnoreCase))
+                return "Tất cả lớp";
+
+            var selected = options?.FirstOrDefault(x => string.Equals(x.Value, value.Trim(), StringComparison.OrdinalIgnoreCase));
+            return string.IsNullOrWhiteSpace(selected?.Label)
+                ? $"Lớp {value.Trim()}"
+                : selected.Label;
+        }
+
+        private static string ResolveNurseStockStatusLabel(string? value)
+        {
+            return string.Equals(value, "low", StringComparison.OrdinalIgnoreCase)
+                ? "Tồn kho thấp"
+                : "Ổn định";
+        }
+
+        private static string ResolveNurseAlertToneLabel(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "danger" => "Khẩn",
+                "warning" => "Cần chú ý",
+                _ => "Thông tin"
+            };
+        }
+
+        private static string ResolveNurseClassStatusLabel(string? value)
+        {
+            return value?.Trim().ToLowerInvariant() switch
+            {
+                "alert" => "Cần chú ý",
+                "watch" => "Theo dõi",
+                _ => "Ổn định"
+            };
         }
 
         private static string NormalizeTimeRange(string? value)

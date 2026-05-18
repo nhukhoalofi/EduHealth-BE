@@ -10,16 +10,19 @@ namespace EduHealth.Hubs
     public class ChatHub : Hub
     {
         private readonly IMessagingService _messagingService;
+        private readonly ILogger<ChatHub> _logger;
 
-        public ChatHub(IMessagingService messagingService)
+        public ChatHub(IMessagingService messagingService, ILogger<ChatHub> logger)
         {
             _messagingService = messagingService;
+            _logger = logger;
         }
 
         public async Task JoinConversation(ConversationRequest request, CancellationToken cancellationToken)
         {
             if (!TryGetCurrentUser(out var userId))
             {
+                _logger.LogWarning("JoinConversation: unauthorized connection {ConnectionId}", Context.ConnectionId);
                 await SendErrorAsync(BuildError("UNAUTHORIZED", "Token không hợp lệ."), cancellationToken);
                 return;
             }
@@ -27,11 +30,13 @@ namespace EduHealth.Hubs
             var (success, error) = await _messagingService.EnsureParticipantAsync(request.ConversationId, userId, cancellationToken);
             if (!success)
             {
+                _logger.LogWarning("JoinConversation denied: user {UserId} conversation {ConversationId}", userId, request.ConversationId);
                 await SendErrorAsync(error ?? BuildError("CONVERSATION_ACCESS_DENIED", "Bạn không có quyền truy cập cuộc trò chuyện.", request.ConversationId), cancellationToken);
                 return;
             }
 
-            await Groups.AddToGroupAsync(Context.ConnectionId, GetConversationGroup(request.ConversationId), cancellationToken);
+            await Groups.AddToGroupAsync(Context.ConnectionId, BuildConversationGroup(request.ConversationId), cancellationToken);
+            _logger.LogInformation("JoinConversation ok: user {UserId} conversation {ConversationId} connection {ConnectionId}", userId, request.ConversationId, Context.ConnectionId);
             await Clients.Caller.SendAsync("JoinedConversation", new
             {
                 conversationId = request.ConversationId,
@@ -54,7 +59,7 @@ namespace EduHealth.Hubs
                 return;
             }
 
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, GetConversationGroup(request.ConversationId), cancellationToken);
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, BuildConversationGroup(request.ConversationId), cancellationToken);
             await Clients.Caller.SendAsync("LeftConversation", new
             {
                 conversationId = request.ConversationId,
@@ -66,6 +71,7 @@ namespace EduHealth.Hubs
         {
             if (!TryGetCurrentUser(out var userId))
             {
+                _logger.LogWarning("SendMessage: unauthorized connection {ConnectionId}", Context.ConnectionId);
                 await SendErrorAsync(BuildError("UNAUTHORIZED", "Token không hợp lệ.", request.ConversationId, request.ClientMessageId), cancellationToken);
                 return;
             }
@@ -81,12 +87,23 @@ namespace EduHealth.Hubs
             var (success, error, message, updates) = await _messagingService.SendMessageAsync(userId, request.ConversationId, sendRequest, cancellationToken);
             if (!success || message is null)
             {
+                _logger.LogWarning("SendMessage failed: user {UserId} conversation {ConversationId}", userId, request.ConversationId);
                 await SendErrorAsync(error ?? BuildError("SEND_MESSAGE_FAILED", "Gửi tin nhắn thất bại.", request.ConversationId, request.ClientMessageId), cancellationToken);
                 return;
             }
 
-            await Clients.Group(GetConversationGroup(request.ConversationId))
-                .SendAsync("MessageCreated", message, cancellationToken);
+            if (updates.Count > 0)
+            {
+                await Clients.Users(updates.Keys.Select(x => x.ToString()))
+                    .SendAsync("MessageCreated", message, cancellationToken);
+            }
+            else
+            {
+                await Clients.Group(BuildConversationGroup(request.ConversationId))
+                    .SendAsync("MessageCreated", message, cancellationToken);
+            }
+
+            _logger.LogInformation("MessageCreated broadcast: conversation {ConversationId} users {UserCount}", request.ConversationId, updates.Count);
 
             foreach (var update in updates)
             {
@@ -127,7 +144,7 @@ namespace EduHealth.Hubs
                 SentAt = DateTime.UtcNow
             };
 
-            await Clients.OthersInGroup(GetConversationGroup(request.ConversationId))
+            await Clients.OthersInGroup(BuildConversationGroup(request.ConversationId))
                 .SendAsync("TypingChanged", payload, cancellationToken);
         }
 
@@ -151,7 +168,7 @@ namespace EduHealth.Hubs
                 return;
             }
 
-            await Clients.Group(GetConversationGroup(request.ConversationId))
+            await Clients.Group(BuildConversationGroup(request.ConversationId))
                 .SendAsync("ConversationRead", data, cancellationToken);
         }
 
@@ -162,7 +179,7 @@ namespace EduHealth.Hubs
             return !string.IsNullOrWhiteSpace(userIdClaim) && int.TryParse(userIdClaim, out userId);
         }
 
-        private static string GetConversationGroup(int conversationId) => $"conversation:{conversationId}";
+        public static string BuildConversationGroup(int conversationId) => $"conversation:{conversationId}";
 
         private Task SendErrorAsync(MessagingErrorDto error, CancellationToken cancellationToken)
         {
