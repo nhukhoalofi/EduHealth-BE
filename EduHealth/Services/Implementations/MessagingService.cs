@@ -10,12 +10,48 @@ namespace EduHealth.Services.Implementations
         private const string RoleNurse = "NURSE";
         private const string RoleStudent = "STUDENT";
         private const string MessageTypeText = "TEXT";
+        private const int MaxAttachmentCount = 5;
+        private const long MaxAttachmentSizeBytes = 10 * 1024 * 1024;
 
         private readonly IMessagingRepository _messagingRepository;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly IConfiguration _configuration;
 
-        public MessagingService(IMessagingRepository messagingRepository)
+        private static readonly HashSet<string> AllowedAttachmentExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".txt"
+        };
+
+        private static readonly HashSet<string> AllowedAttachmentContentTypes = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text/plain"
+        };
+
+        public MessagingService(
+            IMessagingRepository messagingRepository,
+            ICloudinaryService cloudinaryService,
+            IConfiguration configuration)
         {
             _messagingRepository = messagingRepository;
+            _cloudinaryService = cloudinaryService;
+            _configuration = configuration;
         }
 
         public async Task<(bool Success, MessagingErrorDto? Error, PagedResultDto<ConversationListItemDto>? Data)> GetConversationsAsync(
@@ -272,28 +308,45 @@ namespace EduHealth.Services.Implementations
                 return (false, BuildError("INVALID_MESSAGE_TYPE", "Loại tin nhắn không hợp lệ.", conversationId, request.ClientMessageId), null, new Dictionary<int, ConversationListItemDto>());
             }
 
+            var files = request.Files?.Where(x => x is not null && x.Length > 0).ToList() ?? new List<IFormFile>();
+            var attachmentValidation = ValidateAttachments(files);
+            if (!attachmentValidation.Success)
+            {
+                return (false, BuildError("INVALID_ATTACHMENT", attachmentValidation.Message, conversationId, request.ClientMessageId), null, new Dictionary<int, ConversationListItemDto>());
+            }
+
             var content = request.Content?.Trim();
-            if (string.IsNullOrWhiteSpace(content))
+            if (string.IsNullOrWhiteSpace(content) && files.Count == 0)
             {
                 return (false, BuildError("MESSAGE_CONTENT_REQUIRED", "Nội dung tin nhắn không được rỗng.", conversationId, request.ClientMessageId), null, new Dictionary<int, ConversationListItemDto>());
             }
 
-            if (content.Length > 2000)
+            if (content?.Length > 2000)
             {
                 return (false, BuildError("MESSAGE_TOO_LONG", "Nội dung tin nhắn vượt quá 2000 ký tự.", conversationId, request.ClientMessageId), null, new Dictionary<int, ConversationListItemDto>());
             }
 
             var now = VietnamTimeHelper.Now;
+            List<ChatMessageAttachment> attachments;
+            try
+            {
+                attachments = await UploadAttachmentsAsync(files, currentUserId, now, cancellationToken);
+            }
+            catch
+            {
+                return (false, BuildError("ATTACHMENT_UPLOAD_FAILED", "Upload file đính kèm thất bại.", conversationId, request.ClientMessageId), null, new Dictionary<int, ConversationListItemDto>());
+            }
 
             var message = new ChatMessage
             {
                 ConversationId = conversationId,
                 SenderUserId = currentUserId,
-                Content = content,
+                Content = content ?? string.Empty,
                 MessageType = messageType,
                 ClientMessageId = request.ClientMessageId,
                 SentAt = now,
-                IsDeleted = false
+                IsDeleted = false,
+                Attachments = attachments
             };
 
             await _messagingRepository.AddMessageAsync(message, cancellationToken);
@@ -471,6 +524,80 @@ namespace EduHealth.Services.Implementations
                 ConversationId = conversationId,
                 ClientMessageId = clientMessageId
             };
+        }
+
+        private static (bool Success, string Message) ValidateAttachments(IReadOnlyList<IFormFile> files)
+        {
+            if (files.Count == 0)
+            {
+                return (true, string.Empty);
+            }
+
+            if (files.Count > MaxAttachmentCount)
+            {
+                return (false, $"Mỗi tin nhắn chỉ được đính kèm tối đa {MaxAttachmentCount} file.");
+            }
+
+            foreach (var file in files)
+            {
+                if (file.Length <= 0)
+                {
+                    return (false, "File đính kèm không hợp lệ.");
+                }
+
+                if (file.Length > MaxAttachmentSizeBytes)
+                {
+                    return (false, "Dung lượng mỗi file đính kèm không được vượt quá 10MB.");
+                }
+
+                var extension = Path.GetExtension(file.FileName);
+                if (string.IsNullOrWhiteSpace(extension) || !AllowedAttachmentExtensions.Contains(extension))
+                {
+                    return (false, "File đính kèm chỉ hỗ trợ jpg, jpeg, png, webp, pdf, doc, docx, xls, xlsx, txt.");
+                }
+
+                if (string.IsNullOrWhiteSpace(file.ContentType) || !AllowedAttachmentContentTypes.Contains(file.ContentType))
+                {
+                    return (false, "Định dạng file đính kèm không hợp lệ.");
+                }
+            }
+
+            return (true, string.Empty);
+        }
+
+        private async Task<List<ChatMessageAttachment>> UploadAttachmentsAsync(
+            IReadOnlyList<IFormFile> files,
+            int uploadedByUserId,
+            DateTime uploadedAt,
+            CancellationToken cancellationToken)
+        {
+            var attachments = new List<ChatMessageAttachment>();
+            if (files.Count == 0)
+            {
+                return attachments;
+            }
+
+            var folderRoot = _configuration["Cloudinary:Folder"];
+            var folder = string.IsNullOrWhiteSpace(folderRoot) ? "eduhealth/chat" : $"{folderRoot.Trim().TrimEnd('/')}/chat";
+
+            foreach (var file in files)
+            {
+                var (url, publicId) = await _cloudinaryService.UploadFileAsync(file, folder, cancellationToken);
+                var originalFileName = Path.GetFileName(file.FileName);
+
+                attachments.Add(new ChatMessageAttachment
+                {
+                    FileName = string.IsNullOrWhiteSpace(publicId) ? originalFileName : publicId,
+                    OriginalFileName = originalFileName,
+                    FileUrl = url,
+                    ContentType = file.ContentType,
+                    SizeBytes = file.Length,
+                    UploadedByUserId = uploadedByUserId,
+                    UploadedAt = uploadedAt
+                });
+            }
+
+            return attachments;
         }
 
         private ConversationListItemDto MapConversationListItem(Conversation conversation, int currentUserId, Dictionary<int, int> unreadCounts)

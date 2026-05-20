@@ -109,6 +109,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPost("conversations/{conversationId:int}/messages")]
+        [Consumes("application/json")]
         public async Task<IActionResult> SendMessage([FromRoute] int conversationId, [FromBody] SendMessageRequestDto request, CancellationToken cancellationToken)
         {
             if (!TryGetCurrentUser(out var userId, out _))
@@ -143,6 +144,44 @@ namespace EduHealth.Controllers
             }
 
             return Ok(ApiResponse<MessageItemDto>.Ok(data, "Gửi tin nhắn thành công."));
+        }
+
+        [HttpPost("conversations/{conversationId:int}/messages")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> SendMessageWithAttachments([FromRoute] int conversationId, [FromForm] SendMessageRequestDto request, CancellationToken cancellationToken)
+        {
+            if (!TryGetCurrentUser(out var userId, out _))
+            {
+                return Unauthorized(ApiResponse<object>.Fail("Token khÃ´ng há»£p lá»‡."));
+            }
+
+            var (success, error, data, updates) = await _messagingService.SendMessageAsync(userId, conversationId, request, cancellationToken);
+            if (!success)
+            {
+                return MapMessagingError(error);
+            }
+
+            if (data is not null)
+            {
+                if (updates.Count > 0)
+                {
+                    await _chatHubContext.Clients.Users(updates.Keys.Select(x => x.ToString()))
+                        .SendAsync("MessageCreated", data, cancellationToken);
+                }
+                else
+                {
+                    await _chatHubContext.Clients.Group(ChatHub.BuildConversationGroup(conversationId))
+                        .SendAsync("MessageCreated", data, cancellationToken);
+                }
+
+                foreach (var update in updates)
+                {
+                    await _chatHubContext.Clients.User(update.Key.ToString())
+                        .SendAsync("ConversationUpdated", update.Value, cancellationToken);
+                }
+            }
+
+            return Ok(ApiResponse<MessageItemDto>.Ok(data, "Gá»­i tin nháº¯n thÃ nh cÃ´ng."));
         }
 
         [HttpGet("contacts/students")]
@@ -209,6 +248,8 @@ namespace EduHealth.Controllers
                 "MESSAGE_CONTENT_REQUIRED" => BadRequest(ApiResponse<object>.Fail(error.Message, "content")),
                 "MESSAGE_TOO_LONG" => BadRequest(ApiResponse<object>.Fail(error.Message, "content")),
                 "INVALID_MESSAGE_TYPE" => BadRequest(ApiResponse<object>.Fail(error.Message, "messageType")),
+                "INVALID_ATTACHMENT" => BadRequest(ApiResponse<object>.Fail(error.Message, "files")),
+                "ATTACHMENT_UPLOAD_FAILED" => StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.Fail(error.Message, "files")),
                 "INVALID_LAST_READ_MESSAGE" => BadRequest(ApiResponse<object>.Fail(error.Message, "lastReadMessageId")),
                 _ => StatusCode(StatusCodes.Status500InternalServerError, ApiResponse<object>.Fail(error.Message))
             };
