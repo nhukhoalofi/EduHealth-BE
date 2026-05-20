@@ -64,4 +64,35 @@ namespace EduHealth.DTOs.Students.HealthProfile
         public string AllergyTypeName { get; set; } = null!;
         public string? Severity { get; set; }
     }
+
+    public class ClassGrowthComparisonResponseDto
+    {
+        public string ClassId { get; set; } = null!;
+        public string ClassName { get; set; } = null!;
+        public string Metric { get; set; } = null!;
+        public string Unit { get; set; } = null!;
+        public ClassGrowthStudentPointDto CurrentStudent { get; set; } = null!;
+        public IReadOnlyList<ClassGrowthStudentPointDto> Students { get; set; } = Array.Empty<ClassGrowthStudentPointDto>();
+        public ClassGrowthSummaryDto Summary { get; set; } = null!;
+    }
+
+    public class ClassGrowthStudentPointDto
+    {
+        public string StudentId { get; set; } = null!;
+        public string StudentCode { get; set; } = null!;
+        public string FullName { get; set; } = null!;
+        public float Value { get; set; }
+        public int Rank { get; set; }
+        public bool IsCurrentStudent { get; set; }
+    }
+
+    public class ClassGrowthSummaryDto
+    {
+        public int TotalStudents { get; set; }
+        public float Min { get; set; }
+        public float Max { get; set; }
+        public float Average { get; set; }
+        public float CurrentValue { get; set; }
+        public float Percentile { get; set; }
+    }
 }

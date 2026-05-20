@@ -6,6 +6,11 @@ namespace EduHealth.Services.Interfaces
     {
         Task<IReadOnlyList<AllergyTypeLookupItemDto>> GetAllergyTypesAsync(CancellationToken cancellationToken = default);
         Task<StudentHealthProfileResponseDto?> GetHealthProfileAsync(int studentUserId, CancellationToken cancellationToken = default);
+        Task<ClassGrowthComparisonResponseDto?> GetClassGrowthComparisonAsync(
+            int studentUserId,
+            string? metric,
+            CancellationToken cancellationToken = default);
+
         Task<(bool Success, string Message, string? Field, StudentHealthProfileResponseDto? Data)> UpdateHealthProfileAsync(
             int nurseUserId,
             int studentUserId,

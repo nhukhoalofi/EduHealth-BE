@@ -166,6 +166,32 @@ namespace EduHealth.Controllers
             return Ok(ApiResponse<StudentHealthProfileResponseDto>.Ok(data, "Lấy hồ sơ sức khỏe thành công."));
         }
 
+        [HttpGet("{id:int}/health-profile/class-growth-comparison")]
+        [Authorize(Roles = "ADMIN,NURSE,STUDENT")]
+        public async Task<IActionResult> GetClassGrowthComparison(
+            [FromRoute] int id,
+            [FromQuery] string? metric,
+            CancellationToken cancellationToken)
+        {
+            if (User.IsInRole("STUDENT"))
+            {
+                var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (!int.TryParse(userIdClaim, out var currentUserId) || currentUserId != id)
+                {
+                    return Forbid();
+                }
+            }
+
+            var data = await _studentHealthService.GetClassGrowthComparisonAsync(id, metric, cancellationToken);
+
+            if (data is null)
+            {
+                return NotFound(ApiResponse<object>.Fail("Không tìm thấy học sinh.", "id"));
+            }
+
+            return Ok(ApiResponse<ClassGrowthComparisonResponseDto>.Ok(data, "Lấy dữ liệu so sánh trong lớp thành công."));
+        }
+
         [HttpPatch("{id:int}/health-profile")]
         [Authorize(Roles = "NURSE")]
         public async Task<IActionResult> UpdateHealthProfile(
