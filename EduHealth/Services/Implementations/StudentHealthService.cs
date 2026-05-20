@@ -252,6 +252,83 @@ namespace EduHealth.Services.Implementations
             };
         }
 
+        public async Task<ClassGrowthComparisonResponseDto?> GetClassGrowthComparisonAsync(
+            int studentUserId,
+            string? metric,
+            CancellationToken cancellationToken = default)
+        {
+            var normalizedMetric = NormalizeNullableText(metric)?.ToLowerInvariant();
+            if (normalizedMetric is not ("weight" or "weightkg"))
+            {
+                normalizedMetric = "height";
+            }
+
+            var currentStudent = await _context.Students
+                .AsNoTracking()
+                .Include(x => x.User)
+                .Include(x => x.Class)
+                .FirstOrDefaultAsync(x => x.UserId == studentUserId, cancellationToken);
+
+            if (currentStudent is null)
+            {
+                return null;
+            }
+
+            var isWeight = normalizedMetric is "weight" or "weightkg";
+            var points = await _context.Students
+                .AsNoTracking()
+                .Include(x => x.User)
+                .Where(x => x.ClassId == currentStudent.ClassId)
+                .Select(x => new ClassGrowthStudentPointDto
+                {
+                    StudentId = x.Code,
+                    StudentCode = x.User.Username,
+                    FullName = x.FullName,
+                    Value = isWeight ? x.CurrentWeight : x.CurrentHeight,
+                    IsCurrentStudent = x.UserId == studentUserId
+                })
+                .OrderBy(x => x.Value)
+                .ThenBy(x => x.FullName)
+                .ToListAsync(cancellationToken);
+
+            for (var index = 0; index < points.Count; index++)
+            {
+                points[index].Rank = index + 1;
+            }
+
+            var highlightedStudent = points.FirstOrDefault(x => x.IsCurrentStudent);
+            if (highlightedStudent is null || points.Count == 0)
+            {
+                return null;
+            }
+
+            var min = points.Min(x => x.Value);
+            var max = points.Max(x => x.Value);
+            var average = (float)Math.Round(points.Average(x => x.Value), 1);
+            var percentile = points.Count == 1
+                ? 100
+                : (float)Math.Round((highlightedStudent.Rank - 1) * 100d / (points.Count - 1), 1);
+
+            return new ClassGrowthComparisonResponseDto
+            {
+                ClassId = currentStudent.Class.Code,
+                ClassName = currentStudent.Class.ClassName,
+                Metric = isWeight ? "weight" : "height",
+                Unit = isWeight ? "kg" : "cm",
+                CurrentStudent = highlightedStudent,
+                Students = points,
+                Summary = new ClassGrowthSummaryDto
+                {
+                    TotalStudents = points.Count,
+                    Min = min,
+                    Max = max,
+                    Average = average,
+                    CurrentValue = highlightedStudent.Value,
+                    Percentile = percentile
+                }
+            };
+        }
+
         public async Task<(bool Success, string Message, string? Field, StudentHealthProfileResponseDto? Data)> UpdateHealthProfileAsync(
             int nurseUserId,
             int studentUserId,
