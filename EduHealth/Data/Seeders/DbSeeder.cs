@@ -1,4 +1,4 @@
-﻿using EduHealth.Data.Entities;
+using EduHealth.Data.Entities;
 using EduHealth.Helpers;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,1001 +6,777 @@ namespace EduHealth.Data.Seeders
 {
     public static class DbSeeder
     {
+        private const string DefaultPassword = "123456";
+
         public static async Task SeedAdminAsync(AppDbContext context)
         {
-            // Only seed on first run (empty DB).
             if (await context.Users.AnyAsync())
             {
                 return;
             }
 
-            await SeedUsersAsync(context);
-            await SeedSchoolClassesAsync(context);
-            await SeedDiseaseTypesAsync(context);
-            await SeedAllergyTypesAsync(context);
-            await SeedVaccinationsAsync(context);
-            await SeedMedicinesAsync(context);
-            await SeedStudentsAndRelationsAsync(context);
-            await SeedHealthVisitsAsync(context);
-            await SeedNotificationsAsync(context);
-
-            // Seed dữ liệu lớn, không cleanup/xóa nữa
-            await SeedBulkDataAsync(context);
-
-            // Chạy sau khi đã có lớp + học sinh bulk
-            await SeedVaccinationCampaignsAsync(context);
-        }
-
-        private static async Task SeedBulkDataAsync(AppDbContext context)
-        {
-            // Không xóa dữ liệu cũ nữa.
-            // Chỉ thêm dữ liệu nếu chưa tồn tại.
-            await SeedMoreClassesAsync(context);
-            await SeedMoreMedicinesAsync(context);
-            await SeedManyStudentsAsync(context);
-        }
-
-        private static async Task SeedMoreClassesAsync(AppDbContext context)
-        {
-            // Seed 5 grades, each grade has 2 classes: 1/1, 1/2 ... 5/1, 5/2
-            var existing = await context.SchoolClasses
-                .Where(x => x.Code.StartsWith("CLS"))
-                .Select(x => x.Code)
-                .ToHashSetAsync();
-
-            var teacherLastNames = new[] { "Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Vũ", "Đỗ", "Bùi" };
-            var teacherMiddleNames = new[] { "Thị", "Văn", "Ngọc", "Thu", "Minh", "Quỳnh" };
-            var teacherFirstNames = new[] { "Lan", "Mai", "Hương", "Linh", "Hạnh", "Trang", "Nhung", "Phong" };
-
-            var random = new Random(2026);
-            var need = new List<SchoolClass>();
-            var codeNumber = 101;
-
-            for (var grade = 1; grade <= 5; grade++)
-            {
-                for (var section = 1; section <= 2; section++)
-                {
-                    var code = $"CLS{codeNumber:D3}";
-                    codeNumber++;
-
-                    if (existing.Contains(code)) continue;
-
-                    var teacherName = $"{teacherLastNames[random.Next(teacherLastNames.Length)]} " +
-                                      $"{teacherMiddleNames[random.Next(teacherMiddleNames.Length)]} " +
-                                      $"{teacherFirstNames[random.Next(teacherFirstNames.Length)]}";
-
-                    need.Add(new SchoolClass
-                    {
-                        Code = code,
-                        ClassName = $"{grade}/{section}",
-                        Grade = grade.ToString(),
-                        TeacherName = teacherName,
-                        TeacherPhone = $"09{random.Next(10000000, 99999999)}"
-                    });
-                }
-            }
-
-            if (need.Count > 0)
-            {
-                context.SchoolClasses.AddRange(need);
-                await context.SaveChangesAsync();
-            }
-        }
-
-        private static async Task SeedMoreMedicinesAsync(AppDbContext context)
-        {
-            // Seed 30 medicines with code MED101..MED130
-            var existingCodes = await context.Medicines
-                .Where(x => x.Code.StartsWith("MED"))
-                .Select(x => x.Code)
-                .ToHashSetAsync();
-
             var now = DateTime.UtcNow;
-            var meds = new List<Medicine>();
+            var random = new Random(20260523);
 
-            for (var i = 1; i <= 30; i++)
+            await using var tx = await context.Database.BeginTransactionAsync();
+
+            var users = SeedUsers(context, now, random);
+            await context.SaveChangesAsync();
+
+            var admin = users.Single(x => x.Role == "ADMIN");
+            var nurses = users.Where(x => x.Role == "NURSE").ToList();
+
+            var classes = SeedClasses(context);
+            await context.SaveChangesAsync();
+
+            var students = SeedStudents(context, users, classes, random);
+            var diseases = SeedDiseaseTypes(context);
+            var allergyTypes = SeedAllergyTypes(context);
+            var vaccinations = SeedVaccinations(context, now);
+            var medicines = SeedMedicines(context, now);
+            await context.SaveChangesAsync();
+
+            SeedStudentAllergies(context, students, allergyTypes, random);
+            await context.SaveChangesAsync();
+
+            SeedMedicineStockInLogs(context, medicines, nurses, now);
+            await context.SaveChangesAsync();
+
+            var visits = SeedHealthVisits(context, students, nurses, diseases, random, now);
+            await context.SaveChangesAsync();
+
+            SeedVisitPrescriptionsAndDispenseLogs(context, visits, medicines, nurses, random, now);
+            await context.SaveChangesAsync();
+
+            SeedVaccinationCampaigns(context, admin, classes, students, vaccinations, random, now);
+            await context.SaveChangesAsync();
+
+            SeedNotifications(context, admin, nurses, students, classes, diseases, vaccinations, now);
+            await context.SaveChangesAsync();
+
+            await SeedMessagingAsync(context, admin, nurses, students, now);
+
+            SeedSystemLogs(context, admin, nurses, now);
+            await context.SaveChangesAsync();
+
+            await tx.CommitAsync();
+        }
+
+        private static List<User> SeedUsers(AppDbContext context, DateTime now, Random random)
+        {
+            var users = new List<User>
             {
-                var code = $"MED{(100 + i):D3}";
-                if (existingCodes.Contains(code)) continue;
-
-                var (name, ing, unit, pack, note) = i switch
+                new()
                 {
-                    1 => ("Ibuprofen 200mg", "Ibuprofen", "VIEN", "Hộp 10 vỉ", "Giảm đau, hạ sốt"),
-                    2 => ("Cetirizine 10mg", "Cetirizine", "VIEN", "Hộp", "Chống dị ứng"),
-                    3 => ("Amoxicillin 500mg", "Amoxicillin", "VIEN", "Hộp", "Kháng sinh"),
-                    4 => ("Natri clorid 0.9%", "NaCl", "CHAI", "Chai 500ml", "Vệ sinh mũi"),
-                    _ => ($"Thuốc bổ sung {i}", $"Hoạt chất {i}", i % 3 == 0 ? "GOI" : "VIEN", i % 2 == 0 ? "Hộp" : "Lọ", "Dữ liệu seed")
-                };
-
-                meds.Add(new Medicine
-                {
-                    Code = code,
-                    Name = name,
-                    ActiveIngredient = ing,
-                    Unit = unit,
-                    Packaging = pack,
-                    WarningThreshold = 20,
-                    StockQuantity = 500,
+                    Code = "USR001",
+                    Username = "admin",
+                    Phone = "0900000001",
+                    Role = "ADMIN",
+                    FullName = "Quản trị viên EduHealth",
+                    IsActive = true,
                     Status = "ACTIVE",
-                    Note = note,
                     CreatedAt = now,
-                    UpdatedAt = now
+                    UpdatedAt = now,
+                    Email = "admin@eduhealth.local",
+                    PasswordHash = PasswordHelper.HashPassword("123456Aa@"),
+                    Gender = "OTHER"
+                }
+            };
+
+            var nurseNames = new[]
+            {
+                ("Nguyễn Thị Lan", "FEMALE"),
+                ("Trần Minh Khoa", "MALE"),
+                ("Lê Thị Hồng Nhung", "FEMALE"),
+                ("Phạm Quốc Bảo", "MALE"),
+                ("Võ Thanh Mai", "FEMALE")
+            };
+
+            for (var i = 0; i < nurseNames.Length; i++)
+            {
+                users.Add(new User
+                {
+                    Code = $"USR{(i + 2):D3}",
+                    Username = $"nurse{i + 1:D2}",
+                    Phone = $"090000000{i + 2}",
+                    Role = "NURSE",
+                    FullName = nurseNames[i].Item1,
+                    IsActive = true,
+                    Status = "ACTIVE",
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    Email = $"nurse{i + 1:D2}@eduhealth.local",
+                    PasswordHash = PasswordHelper.HashPassword(DefaultPassword),
+                    Gender = nurseNames[i].Item2
                 });
             }
 
-            if (meds.Count > 0)
+            var lastNames = new[] { "Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ", "Ngô", "Dương", "Lý", "Mai", "Trương" };
+            var middleNames = new[] { "Văn", "Thị", "Minh", "Ngọc", "Gia", "Khánh", "Thanh", "Hoài", "Bảo", "Anh", "Quang", "Phương" };
+            var firstNames = new[] { "An", "Bình", "Chi", "Dũng", "Hà", "Huy", "Khánh", "Lan", "Mai", "Nam", "Phúc", "Quân", "Trang", "Vy", "Giang", "Hiếu", "Khoa", "Linh", "Long", "Nhi", "Phát", "Sơn", "Thảo", "Uyên", "Yến" };
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            for (var seq = 1; seq <= 305; seq++)
             {
-                context.Medicines.AddRange(meds);
-                await context.SaveChangesAsync();
-            }
-        }
-
-        private static async Task SeedManyStudentsAsync(AppDbContext context)
-        {
-            if (await context.Students.AnyAsync())
-            {
-                return;
-            }
-            // Create 300 students/users: 5 grades * 2 classes/grade * 30 students/class
-            if (await context.Students.AnyAsync())
-            {
-                return;
-            }
-            const int studentsPerClass = 30;
-            const int userStart = 100;
-
-            var bulkClasses = await context.SchoolClasses
-                .Where(x => x.Code.CompareTo("CLS101") >= 0 && x.Code.CompareTo("CLS110") <= 0)
-                .OrderBy(x => x.Code)
-                .ToListAsync();
-
-            if (bulkClasses.Count == 0)
-            {
-                return;
-            }
-
-            var total = bulkClasses.Count * studentsPerClass;
-            var startSeq = userStart + 1;
-            var endSeq = userStart + total;
-
-            var existingUsers = await context.Users
-                .AsNoTracking()
-                .Where(x => x.Code.StartsWith("USR") || x.Username.StartsWith("HS"))
-                .Select(x => new { x.Code, x.Username })
-                .ToListAsync();
-
-            var existingUserCodes = existingUsers.Select(x => x.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var existingUsernames = existingUsers.Select(x => x.Username).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var now = DateTime.UtcNow;
-            var users = new List<User>();
-
-            var lastNames = new[]
-            {
-                "Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Võ", "Đặng", "Bùi", "Đỗ", "Hồ",
-                "Ngô", "Dương", "Lý", "Đinh", "Mai", "Trương", "Phan", "Tạ", "Vũ", "Huỳnh"
-            };
-
-            var middleNames = new[]
-            {
-                "Văn", "Thị", "Minh", "Hồng", "Đức", "Quang", "Thu", "Ngọc", "Gia", "Khánh",
-                "Thanh", "Phương", "Hữu", "Hoài", "Anh", "Bảo", "Cẩm", "Nhật", "Tuấn", "Thảo"
-            };
-
-            var firstNames = new[]
-            {
-                "An", "Bình", "Chi", "Dũng", "Hà", "Huy", "Khánh", "Lan", "Mai", "Nam",
-                "Oanh", "Phúc", "Quân", "Trang", "Vy", "Bảo", "Giang", "Hiếu", "Khoa", "Lâm",
-                "Linh", "Long", "My", "Nhi", "Nhung", "Phát", "Phương", "Quyên", "Sơn", "Thảo",
-                "Thịnh", "Thư", "Tiến", "Trúc", "Tuấn", "Uyên", "Yến", "Đạt", "Đăng", "Hân"
-            };
-
-            var random = new Random(2026);
-            var usedFullNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            for (var seq = startSeq; seq <= endSeq; seq++)
-            {
-                var userCode = $"USR{seq:D3}";
-                var username = $"HS{seq:D3}";
-
-                if (existingUserCodes.Contains(userCode) || existingUsernames.Contains(username))
-                {
-                    continue;
-                }
-
-                var email = $"hs{seq:D3}@gmail.com";
-                var phone = $"098{seq:D7}";
-
                 string fullName;
-                var tryCount = 0;
-
+                var tries = 0;
                 do
                 {
-                    fullName = $"{lastNames[random.Next(lastNames.Length)]} " +
-                               $"{middleNames[random.Next(middleNames.Length)]} " +
-                               $"{firstNames[random.Next(firstNames.Length)]}";
-
-                    tryCount++;
-
-                    if (tryCount > 8)
+                    fullName = $"{lastNames[random.Next(lastNames.Length)]} {middleNames[random.Next(middleNames.Length)]} {firstNames[random.Next(firstNames.Length)]}";
+                    tries++;
+                    if (tries > 6)
                     {
-                        fullName = $"{fullName} {seq % 10}";
+                        fullName = $"{fullName} {seq:D3}";
                     }
-                } while (!usedFullNames.Add(fullName));
+                } while (!usedNames.Add(fullName));
 
                 users.Add(new User
                 {
-                    Code = userCode,
-                    Username = username,
-                    Phone = phone,
+                    Code = $"USR{(seq + 6):D3}",
+                    Username = $"HS{seq:D3}",
+                    Phone = $"098{seq:D7}",
                     Role = "STUDENT",
                     FullName = fullName,
                     IsActive = true,
                     Status = "ACTIVE",
                     CreatedAt = now,
                     UpdatedAt = now,
-                    Email = email,
-                    PasswordHash = PasswordHelper.HashPassword("123456"),
-                    Avatar = null,
+                    Email = $"hs{seq:D3}@eduhealth.local",
+                    PasswordHash = PasswordHelper.HashPassword(DefaultPassword),
                     Gender = seq % 2 == 0 ? "FEMALE" : "MALE"
                 });
             }
 
-            if (users.Count > 0)
-            {
-                context.Users.AddRange(users);
-                await context.SaveChangesAsync();
-            }
-
-            var bulkUsers = await context.Users
-                .AsNoTracking()
-                .Where(x => x.Code.CompareTo($"USR{startSeq:D3}") >= 0
-                         && x.Code.CompareTo($"USR{endSeq:D3}") <= 0
-                         && x.Username.StartsWith("HS"))
-                .OrderBy(x => x.Code)
-                .Select(x => new { x.UserId, x.Code, x.Username, x.FullName, x.Phone })
-                .ToListAsync();
-
-            var existingStudentUserIds = await context.Students
-                .AsNoTracking()
-                .Where(x => x.UserId >= userStart)
-                .Select(x => x.UserId)
-                .ToHashSetAsync();
-
-            var guardianLastNames = new[] { "Nguyễn", "Trần", "Lê", "Phạm", "Hoàng", "Đặng" };
-            var guardianFirstNames = new[] { "Hùng", "Hòa", "Hải", "Hạnh", "Hoa", "Thủy", "Tuấn", "Tâm", "Hiền", "Duyên" };
-
-            var students = new List<Student>();
-
-            foreach (var item in bulkUsers.Select((u, idx) => new { User = u, Index = idx }))
-            {
-                var u = item.User;
-                var idx = item.Index;
-
-                if (existingStudentUserIds.Contains(u.UserId))
-                {
-                    continue;
-                }
-
-                var classIndex = (idx / studentsPerClass) % bulkClasses.Count;
-                var assignedClass = bulkClasses[classIndex];
-
-                var grade = int.TryParse(assignedClass.Grade, out var g) ? g : 1;
-                var guardian = $"{guardianLastNames[u.UserId % guardianLastNames.Length]} " +
-                               $"{guardianFirstNames[u.UserId % guardianFirstNames.Length]}";
-
-                var birthYear = 2021 - grade;
-                var dayOfYear = random.Next(1, 365);
-                var dob = new DateTime(birthYear, 1, 1).AddDays(dayOfYear - 1);
-
-                var height = (float)Math.Round(105 + grade * 6 + random.NextDouble() * 12, 1);
-                var weight = (float)Math.Round(16 + grade * 3 + random.NextDouble() * 10, 1);
-
-                students.Add(new Student
-                {
-                    UserId = u.UserId,
-                    Code = $"STD{u.UserId:D3}",
-                    ClassId = assignedClass.ClassId,
-                    FullName = u.FullName,
-                    DateOfBirth = dob,
-                    CurrentHeight = height,
-                    CurrentWeight = weight,
-                    MedicalHistoryNotes = null,
-                    Guardian = guardian,
-                    Phone = u.Phone
-                });
-            }
-
-            if (students.Count > 0)
-            {
-                context.Students.AddRange(students);
-                await context.SaveChangesAsync();
-            }
-
-            // Seed health visits for bulk students, only add missing visits.
-            var nurse = await context.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Role == "NURSE");
-            var diseases = await context.DiseaseTypes.AsNoTracking().OrderBy(x => x.DiseaseId).ToListAsync();
-            var med1 = await context.Medicines.AsNoTracking().OrderBy(x => x.MedicineId).FirstOrDefaultAsync();
-            var med2 = await context.Medicines.AsNoTracking().OrderByDescending(x => x.MedicineId).FirstOrDefaultAsync();
-
-            if (nurse == null || !diseases.Any() || med1 == null || med2 == null)
-            {
-                return;
-            }
-
-            var bulkStudentIds = await context.Students
-                .AsNoTracking()
-                .Where(x => x.Code.StartsWith("STD") && x.UserId >= userStart)
-                .Select(x => x.UserId)
-                .ToListAsync();
-
-            var existingVisitStudentIds = await context.HealthVisits
-                .AsNoTracking()
-                .Where(x => x.Code.StartsWith("VIS") && x.StudentUserId >= userStart)
-                .Select(x => x.StudentUserId)
-                .ToHashSetAsync();
-
-            var newVisits = new List<HealthVisit>();
-
-            foreach (var sid in bulkStudentIds)
-            {
-                if (existingVisitStudentIds.Contains(sid))
-                {
-                    continue;
-                }
-
-                newVisits.Add(new HealthVisit
-                {
-                    Code = $"VIS{sid:D3}",
-                    StudentUserId = sid,
-                    NurseId = nurse.UserId,
-                    VisitDate = DateTime.UtcNow.AddDays(-(sid % 30)),
-                    Symptoms = (sid % 3) switch
-                    {
-                        0 => "Sốt nhẹ, mệt mỏi",
-                        1 => "Đau bụng, buồn nôn",
-                        _ => "Ho, sổ mũi"
-                    },
-                    DiseaseId = diseases[sid % diseases.Count].DiseaseId,
-                    Diagnosis = diseases[sid % diseases.Count].DiseaseName,
-                    Treatment = (sid % 3) switch
-                    {
-                        0 => "Theo dõi thân nhiệt, nghỉ ngơi",
-                        1 => "Bù nước, theo dõi triệu chứng",
-                        _ => "Nghỉ ngơi, uống nhiều nước ấm"
-                    },
-                    Note = "Khám tại phòng y tế trường",
-                    MeasuredHeight = 120 + (sid % 30),
-                    MeasuredWeight = 20 + (sid % 15)
-                });
-            }
-
-            if (newVisits.Count == 0)
-            {
-                return;
-            }
-
-            context.HealthVisits.AddRange(newVisits);
-            await context.SaveChangesAsync();
-
-            var newPrescriptions = new List<VisitPrescription>();
-            var newLogs = new List<MedicineStockLog>();
-
-            foreach (var v in newVisits)
-            {
-                newPrescriptions.Add(new VisitPrescription
-                {
-                    VisitId = v.VisitId,
-                    MedicineId = med1.MedicineId,
-                    Quantity = 1,
-                    UsageIns = "1 viên sau ăn"
-                });
-
-                newPrescriptions.Add(new VisitPrescription
-                {
-                    VisitId = v.VisitId,
-                    MedicineId = med2.MedicineId,
-                    Quantity = 1,
-                    UsageIns = "1 viên trước ngủ"
-                });
-
-                newLogs.Add(new MedicineStockLog
-                {
-                    MedicineId = med1.MedicineId,
-                    UserId = nurse.UserId,
-                    Quantity = 1,
-                    StockBefore = med1.StockQuantity,
-                    StockAfter = Math.Max(0, med1.StockQuantity - 1),
-                    Reason = "Seed dispense",
-                    CreatedAt = DateTime.UtcNow,
-                    Type = "DISPENSE",
-                    VisitId = v.VisitId,
-                    Note = "Seed"
-                });
-            }
-
-            context.VisitPrescriptions.AddRange(newPrescriptions);
-            context.MedicineStockLogs.AddRange(newLogs);
-            await context.SaveChangesAsync();
+            context.Users.AddRange(users);
+            return users;
         }
 
-        private static async Task SeedVaccinationCampaignsAsync(AppDbContext context)
+        private static List<SchoolClass> SeedClasses(AppDbContext context)
         {
-            var admin = await context.Users.FirstOrDefaultAsync(x => x.Role == "ADMIN");
-            var vaccinations = await context.Vaccinations.OrderBy(x => x.VaccinationId).Take(2).ToListAsync();
-
-            var classes = await context.SchoolClasses
-                .Where(x => x.Code.CompareTo("CLS101") >= 0 && x.Code.CompareTo("CLS110") <= 0)
-                .OrderBy(x => x.ClassId)
-                .ToListAsync();
-
-            var students = await context.Students
-                .AsNoTracking()
-                .Where(x => x.UserId >= 100 && x.Code.StartsWith("STD"))
-                .Select(x => new { x.UserId, x.ClassId })
-                .ToListAsync();
-
-            if (admin == null || !vaccinations.Any() || !classes.Any() || !students.Any())
+            var teacherNames = new[]
             {
-                return;
+                "Nguyễn Thị Thu Hà", "Trần Văn Minh", "Lê Thị Kim Anh", "Phạm Minh Châu", "Hoàng Thị Bích Ngọc",
+                "Võ Quốc Huy", "Đặng Thị Thanh Tâm", "Bùi Minh Đức", "Đỗ Thị Hương Giang", "Hồ Anh Tuấn"
+            };
+
+            var classes = new List<SchoolClass>();
+            var index = 0;
+
+            for (var grade = 1; grade <= 5; grade++)
+            {
+                for (var section = 1; section <= 2; section++)
+                {
+                    classes.Add(new SchoolClass
+                    {
+                        Code = $"CLS{grade}{section:D2}",
+                        ClassName = $"{grade}/{section}",
+                        Grade = grade.ToString(),
+                        TeacherName = teacherNames[index],
+                        TeacherPhone = $"091{(index + 1):D7}"
+                    });
+                    index++;
+                }
             }
 
-            var random = new Random(2027);
+            context.SchoolClasses.AddRange(classes);
+            return classes;
+        }
 
+        private static List<Student> SeedStudents(AppDbContext context, List<User> users, List<SchoolClass> classes, Random random)
+        {
+            var guardians = new[] { "Nguyễn Văn Hùng", "Trần Thị Hoa", "Lê Minh Hải", "Phạm Thị Hạnh", "Hoàng Quốc Tuấn", "Võ Thị Thanh", "Đặng Minh Tâm", "Bùi Thị Hiền" };
+            var studentUsers = users.Where(x => x.Role == "STUDENT").OrderBy(x => x.Code).ToList();
+            var students = new List<Student>();
+            var userIndex = 0;
+
+            foreach (var cls in classes.OrderBy(x => x.Code))
+            {
+                var grade = int.Parse(cls.Grade!);
+                var count = cls.ClassName.EndsWith("/1", StringComparison.Ordinal) ? 31 : 30;
+
+                for (var ordinal = 1; ordinal <= count; ordinal++)
+                {
+                    var user = studentUsers[userIndex++];
+                    var height = OneDecimal(104 + grade * 6 + random.NextDouble() * 10);
+                    var weight = OneDecimal(15 + grade * 3 + random.NextDouble() * 7);
+                    var birthYear = 2021 - grade;
+
+                    students.Add(new Student
+                    {
+                        UserId = user.UserId,
+                        Code = $"STD{userIndex:D3}",
+                        ClassId = cls.ClassId,
+                        FullName = user.FullName,
+                        DateOfBirth = new DateTime(birthYear, random.Next(1, 13), random.Next(1, 28)),
+                        CurrentHeight = height,
+                        CurrentWeight = weight,
+                        MedicalHistoryNotes = ordinal % 17 == 0 ? "Có tiền sử viêm mũi dị ứng, cần theo dõi khi giao mùa." : null,
+                        Guardian = guardians[userIndex % guardians.Length],
+                        Phone = $"097{userIndex:D7}"
+                    });
+                }
+            }
+
+            context.Students.AddRange(students);
+            return students;
+        }
+
+        private static List<DiseaseType> SeedDiseaseTypes(AppDbContext context)
+        {
+            var diseases = new List<DiseaseType>
+            {
+                new() { Code = "DIS001", DiseaseName = "Cảm lạnh thông thường", Description = "Hắt hơi, sổ mũi, đau họng nhẹ.", IsContagious = true, StandardTreatment = "Nghỉ ngơi, uống nước ấm, theo dõi thân nhiệt." },
+                new() { Code = "DIS002", DiseaseName = "Cúm mùa", Description = "Sốt, đau mỏi cơ, ho, mệt mỏi.", IsContagious = true, StandardTreatment = "Cách ly tạm thời, hạ sốt khi cần, báo phụ huynh." },
+                new() { Code = "DIS003", DiseaseName = "Sốt nhẹ", Description = "Nhiệt độ tăng nhẹ chưa rõ nguyên nhân.", IsContagious = false, StandardTreatment = "Đo nhiệt độ định kỳ, bù nước, nghỉ tại phòng y tế." },
+                new() { Code = "DIS004", DiseaseName = "Đau bụng", Description = "Đau bụng nhẹ, có thể do rối loạn tiêu hóa.", IsContagious = false, StandardTreatment = "Theo dõi triệu chứng, bù nước, liên hệ phụ huynh nếu nặng." },
+                new() { Code = "DIS005", DiseaseName = "Viêm họng", Description = "Đau rát họng, ho, khó nuốt.", IsContagious = true, StandardTreatment = "Súc miệng nước muối, uống nước ấm, theo dõi." },
+                new() { Code = "DIS006", DiseaseName = "Dị ứng da", Description = "Mẩn đỏ, ngứa, nổi mề đay.", IsContagious = false, StandardTreatment = "Tránh tác nhân nghi ngờ, theo dõi phản ứng dị ứng." },
+                new() { Code = "DIS007", DiseaseName = "Đau đầu", Description = "Đau đầu do mệt, thiếu ngủ hoặc căng thẳng.", IsContagious = false, StandardTreatment = "Nghỉ ngơi, uống nước, theo dõi." },
+                new() { Code = "DIS008", DiseaseName = "Chấn thương nhẹ", Description = "Trầy xước, bầm tím, va chạm nhẹ.", IsContagious = false, StandardTreatment = "Sát khuẩn, băng vết thương, chườm lạnh nếu cần." }
+            };
+
+            context.DiseaseTypes.AddRange(diseases);
+            return diseases;
+        }
+
+        private static List<AllergyType> SeedAllergyTypes(AppDbContext context)
+        {
+            var allergies = new List<AllergyType>
+            {
+                new() { AllergyName = "Dị ứng hải sản", Severity = "HIGH" },
+                new() { AllergyName = "Dị ứng thuốc penicillin", Severity = "HIGH" },
+                new() { AllergyName = "Dị ứng phấn hoa", Severity = "MEDIUM" },
+                new() { AllergyName = "Dị ứng bụi nhà", Severity = "MEDIUM" },
+                new() { AllergyName = "Dị ứng sữa bò", Severity = "MEDIUM" },
+                new() { AllergyName = "Dị ứng đậu phộng", Severity = "HIGH" },
+                new() { AllergyName = "Dị ứng thời tiết", Severity = "LOW" }
+            };
+
+            context.AllergyTypes.AddRange(allergies);
+            return allergies;
+        }
+
+        private static List<Vaccination> SeedVaccinations(AppDbContext context, DateTime now)
+        {
+            var vaccinations = new List<Vaccination>
+            {
+                new() { Name = "Sởi - Quai bị - Rubella", Description = "Vaccine MMR phòng sởi, quai bị và rubella.", CreatedAt = now },
+                new() { Name = "Uốn ván - Bạch hầu", Description = "Vaccine phòng uốn ván và bạch hầu theo chương trình học đường.", CreatedAt = now },
+                new() { Name = "Cúm mùa", Description = "Vaccine phòng cúm mùa hằng năm.", CreatedAt = now },
+                new() { Name = "Viêm gan B", Description = "Vaccine phòng viêm gan B.", CreatedAt = now },
+                new() { Name = "Thủy đậu", Description = "Vaccine phòng bệnh thủy đậu.", CreatedAt = now }
+            };
+
+            context.Vaccinations.AddRange(vaccinations);
+            return vaccinations;
+        }
+
+        private static List<Medicine> SeedMedicines(AppDbContext context, DateTime now)
+        {
+            var specs = new[]
+            {
+                ("Paracetamol 500mg", "Paracetamol", "VIEN", "Hộp 10 vỉ x 10 viên", 80, 600, "Dùng hạ sốt, giảm đau thông thường.", 410),
+                ("Ibuprofen 200mg", "Ibuprofen", "VIEN", "Hộp 10 vỉ x 10 viên", 50, 300, "Giảm đau, hạ sốt, kháng viêm.", 380),
+                ("Oresol 245", "Glucose, Natri clorid, Kali clorid", "GOI", "Hộp 20 gói", 60, 420, "Bù nước và điện giải.", 360),
+                ("Cetirizine 10mg", "Cetirizine dihydrochloride", "VIEN", "Hộp 10 vỉ x 10 viên", 40, 260, "Giảm triệu chứng dị ứng.", 520),
+                ("Loratadine 10mg", "Loratadine", "VIEN", "Hộp 10 vỉ x 10 viên", 40, 240, "Kháng histamin điều trị dị ứng.", 500),
+                ("Natri clorid 0.9% 500ml", "Sodium chloride", "CHAI", "Chai 500ml", 30, 120, "Rửa vết thương, vệ sinh ngoài da.", 330),
+                ("Nước muối sinh lý 0.9% 10ml", "Sodium chloride", "ONG", "Hộp 40 ống", 80, 500, "Vệ sinh mắt, mũi.", 300),
+                ("Povidone Iodine 10%", "Povidone iodine", "CHAI", "Chai 90ml", 20, 90, "Sát khuẩn ngoài da.", 420),
+                ("Cồn y tế 70 độ", "Ethanol 70%", "CHAI", "Chai 500ml", 20, 100, "Sát khuẩn dụng cụ, bề mặt da.", 240),
+                ("Gạc vô trùng 5x5cm", "Sterile gauze", "GOI", "Gói 10 miếng", 100, 800, "Che phủ vết thương nhỏ.", 730),
+                ("Băng cuộn y tế 5cm", "Cotton bandage", "CUON", "Cuộn 5cm x 4.5m", 50, 360, "Băng bó vết thương.", 640),
+                ("Băng cá nhân Urgo", "Adhesive bandage", "HOP", "Hộp 100 miếng", 50, 250, "Dán vết thương nhỏ.", 570),
+                ("Dầu gió xanh", "Methyl salicylate, Menthol", "CHAI", "Chai 12ml", 30, 160, "Xoa ngoài khi đau nhức nhẹ.", 450),
+                ("Vitamin C 500mg", "Ascorbic acid", "VIEN", "Lọ 100 viên", 50, 280, "Bổ sung vitamin C.", 690),
+                ("Kẽm gluconate 10mg", "Zinc gluconate", "VIEN", "Hộp 30 viên", 30, 150, "Bổ sung kẽm.", 610),
+                ("Men vi sinh Enterogermina", "Bacillus clausii", "ONG", "Hộp 20 ống", 25, 130, "Hỗ trợ rối loạn tiêu hóa.", 480),
+                ("Smecta 3g", "Diosmectite", "GOI", "Hộp 30 gói", 40, 210, "Hỗ trợ tiêu chảy cấp.", 390),
+                ("Berberin 10mg", "Berberine chloride", "VIEN", "Lọ 100 viên", 30, 180, "Hỗ trợ rối loạn tiêu hóa.", 350),
+                ("Dextromethorphan 15mg", "Dextromethorphan", "VIEN", "Hộp 10 vỉ", 30, 170, "Giảm ho khan.", 430),
+                ("Siro ho thảo dược", "Cao húng chanh, mật ong", "CHAI", "Chai 100ml", 20, 95, "Làm dịu ho, đau rát họng.", 270),
+                ("Nhiệt kế điện tử", "Digital thermometer", "CAI", "Hộp 1 cái", 10, 35, "Đo thân nhiệt.", 900),
+                ("Khẩu trang y tế", "Medical mask", "HOP", "Hộp 50 cái", 80, 600, "Phòng lây nhiễm đường hô hấp.", 180),
+                ("Găng tay y tế nitrile", "Nitrile", "HOP", "Hộp 100 cái", 30, 160, "Bảo hộ khi chăm sóc y tế.", 280),
+                ("Gel rửa tay khô 500ml", "Ethanol", "CHAI", "Chai 500ml", 25, 140, "Sát khuẩn tay nhanh.", 210),
+                ("Dung dịch sát khuẩn Chlorhexidine", "Chlorhexidine gluconate", "CHAI", "Chai 250ml", 15, 80, "Sát khuẩn ngoài da.", 550)
+            };
+
+            var medicines = specs.Select((x, i) => new Medicine
+            {
+                Code = $"MED{i + 1:D3}",
+                Name = x.Item1,
+                ActiveIngredient = x.Item2,
+                Unit = x.Item3,
+                Packaging = x.Item4,
+                WarningThreshold = x.Item5,
+                StockQuantity = x.Item6,
+                NearestExpiryDate = DateOnly.FromDateTime(now.AddDays(x.Item8)),
+                Status = "ACTIVE",
+                Note = x.Item7,
+                CreatedAt = now,
+                UpdatedAt = now
+            }).ToList();
+
+            context.Medicines.AddRange(medicines);
+            return medicines;
+        }
+
+        private static void SeedStudentAllergies(AppDbContext context, List<Student> students, List<AllergyType> allergyTypes, Random random)
+        {
+            var records = new List<StudentAllergy>();
+
+            foreach (var student in students.Where((_, i) => i % 5 == 0))
+            {
+                var allergy = allergyTypes[random.Next(allergyTypes.Count)];
+                records.Add(new StudentAllergy
+                {
+                    UserId = student.UserId,
+                    AllergyId = allergy.AllergyId,
+                    Note = allergy.Severity == "HIGH" ? "Cần báo nhân viên y tế trước khi dùng thuốc hoặc ăn bán trú." : "Theo dõi khi có biểu hiện bất thường."
+                });
+            }
+
+            context.StudentAllergies.AddRange(records);
+        }
+
+        private static void SeedMedicineStockInLogs(AppDbContext context, List<Medicine> medicines, List<User> nurses, DateTime now)
+        {
+            var logs = medicines.Select((medicine, i) => new MedicineStockLog
+            {
+                MedicineId = medicine.MedicineId,
+                UserId = nurses[i % nurses.Count].UserId,
+                Quantity = medicine.StockQuantity,
+                StockBefore = 0,
+                StockAfter = medicine.StockQuantity,
+                Reason = "Nhập kho đầu năm học",
+                ExpiryDate = medicine.NearestExpiryDate,
+                BatchNumber = $"BATCH-{now:yyyy}-{i + 1:D3}",
+                CreatedAt = now.AddDays(-20 + i % 10),
+                Type = "STOCK_IN",
+                Note = "Seed tồn kho ban đầu"
+            }).ToList();
+
+            context.MedicineStockLogs.AddRange(logs);
+        }
+
+        private static List<HealthVisit> SeedHealthVisits(AppDbContext context, List<Student> students, List<User> nurses, List<DiseaseType> diseases, Random random, DateTime now)
+        {
+            var visits = new List<HealthVisit>();
+            var symptoms = new[]
+            {
+                "Sốt nhẹ, mệt mỏi",
+                "Ho, sổ mũi, đau họng",
+                "Đau bụng âm ỉ",
+                "Đau đầu sau giờ ra chơi",
+                "Trầy xước nhẹ ở đầu gối",
+                "Nổi mẩn đỏ vùng tay",
+                "Buồn nôn, chóng mặt"
+            };
+
+            foreach (var student in students.Where((_, i) => i % 3 == 0).Take(105))
+            {
+                var disease = diseases[random.Next(diseases.Count)];
+                var measuredHeight = OneDecimal(student.CurrentHeight + random.NextDouble() * 1.2 - 0.6);
+                var measuredWeight = OneDecimal(student.CurrentWeight + random.NextDouble() * 0.8 - 0.4);
+
+                visits.Add(new HealthVisit
+                {
+                    Code = $"VIS{visits.Count + 1:D4}",
+                    StudentUserId = student.UserId,
+                    NurseId = nurses[visits.Count % nurses.Count].UserId,
+                    VisitDate = now.AddDays(-random.Next(1, 90)).AddHours(random.Next(7, 16)),
+                    Symptoms = symptoms[random.Next(symptoms.Length)],
+                    Diagnosis = disease.DiseaseName,
+                    Treatment = disease.StandardTreatment,
+                    Note = "Đã xử lý tại phòng y tế và ghi nhận theo dõi.",
+                    MeasuredHeight = measuredHeight,
+                    MeasuredWeight = measuredWeight,
+                    DiseaseId = disease.DiseaseId
+                });
+            }
+
+            context.HealthVisits.AddRange(visits);
+            return visits;
+        }
+
+        private static void SeedVisitPrescriptionsAndDispenseLogs(AppDbContext context, List<HealthVisit> visits, List<Medicine> medicines, List<User> nurses, Random random, DateTime now)
+        {
+            var prescriptions = new List<VisitPrescription>();
+            var dispenseLogs = new List<MedicineStockLog>();
+            var stock = medicines.ToDictionary(x => x.MedicineId, x => x.StockQuantity);
+
+            foreach (var visit in visits)
+            {
+                var selected = medicines
+                    .OrderBy(_ => random.Next())
+                    .Take(visit.VisitId % 3 == 0 ? 2 : 1)
+                    .ToList();
+
+                foreach (var medicine in selected)
+                {
+                    var quantity = medicine.Unit is "CHAI" or "HOP" or "CAI" ? 1 : random.Next(1, 4);
+                    var before = stock[medicine.MedicineId];
+                    var after = Math.Max(0, before - quantity);
+                    stock[medicine.MedicineId] = after;
+
+                    prescriptions.Add(new VisitPrescription
+                    {
+                        VisitId = visit.VisitId,
+                        MedicineId = medicine.MedicineId,
+                        Quantity = quantity,
+                        UsageIns = medicine.Unit == "VIEN" ? "Uống sau ăn theo hướng dẫn nhân viên y tế." : "Sử dụng theo hướng dẫn tại phòng y tế."
+                    });
+
+                    dispenseLogs.Add(new MedicineStockLog
+                    {
+                        MedicineId = medicine.MedicineId,
+                        UserId = nurses[(visit.VisitId + medicine.MedicineId) % nurses.Count].UserId,
+                        Quantity = quantity,
+                        StockBefore = before,
+                        StockAfter = after,
+                        Reason = "Cấp thuốc theo lượt khám",
+                        ExpiryDate = medicine.NearestExpiryDate,
+                        BatchNumber = $"BATCH-{now:yyyy}-{medicine.MedicineId:D3}",
+                        CreatedAt = visit.VisitDate,
+                        Type = "DISPENSE",
+                        VisitId = visit.VisitId,
+                        Note = $"Cấp thuốc cho phiếu {visit.Code}"
+                    });
+                }
+            }
+
+            foreach (var medicine in medicines)
+            {
+                medicine.StockQuantity = stock[medicine.MedicineId];
+                medicine.UpdatedAt = now;
+            }
+
+            context.VisitPrescriptions.AddRange(prescriptions);
+            context.MedicineStockLogs.AddRange(dispenseLogs);
+        }
+
+        private static void SeedVaccinationCampaigns(AppDbContext context, User admin, List<SchoolClass> classes, List<Student> students, List<Vaccination> vaccinations, Random random, DateTime now)
+        {
             var campaignSpecs = new[]
             {
-                new
-                {
-                    Code = "VACB001",
-                    Name = "Chiến dịch tiêm chủng học sinh - Mũi 1",
-                    Dose = 1,
-                    ScheduledDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
-                    Vaccine = vaccinations[0]
-                },
-                new
-                {
-                    Code = "VACB002",
-                    Name = "Chiến dịch tiêm chủng học sinh - Mũi 2",
-                    Dose = 2,
-                    ScheduledDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(45)),
-                    Vaccine = vaccinations.Count > 1 ? vaccinations[1] : vaccinations[0]
-                }
+                (Code: "VAC2026-01", Name: "Chiến dịch tiêm vaccine Cúm mùa năm học 2026", Vaccine: vaccinations.Single(x => x.Name == "Cúm mùa"), Dose: 1, Date: DateOnly.FromDateTime(now.AddDays(14))),
+                (Code: "VAC2026-02", Name: "Chiến dịch tiêm Sởi - Quai bị - Rubella", Vaccine: vaccinations.Single(x => x.Name == "Sởi - Quai bị - Rubella"), Dose: 1, Date: DateOnly.FromDateTime(now.AddDays(45))),
+                (Code: "VAC2026-03", Name: "Chiến dịch nhắc lại Uốn ván - Bạch hầu", Vaccine: vaccinations.Single(x => x.Name == "Uốn ván - Bạch hầu"), Dose: 2, Date: DateOnly.FromDateTime(now.AddDays(-25)))
             };
 
             foreach (var spec in campaignSpecs)
             {
-                var camp = await context.VaccinationCampaigns.FirstOrDefaultAsync(x => x.Code == spec.Code);
-
-                if (camp == null)
+                var campaign = new VaccinationCampaign
                 {
-                    camp = new VaccinationCampaign
-                    {
-                        Code = spec.Code,
-                        Name = spec.Name,
-                        VaccineName = spec.Vaccine.Name,
-                        DoseNumber = spec.Dose,
-                        ScheduledDate = spec.ScheduledDate,
-                        TargetType = "CLASS",
-                        Status = "ACTIVE",
-                        Note = "Seed data for 300 students",
-                        CreatedByUserId = admin.UserId,
-                        CreatedAt = DateTime.UtcNow
-                    };
+                    Code = spec.Code,
+                    Name = spec.Name,
+                    VaccineName = spec.Vaccine.Name,
+                    DoseNumber = spec.Dose,
+                    ScheduledDate = spec.Date,
+                    TargetType = "CLASS",
+                    Status = spec.Date < DateOnly.FromDateTime(now) ? "COMPLETED" : "ACTIVE",
+                    Note = "Dữ liệu seed cho chiến dịch tiêm chủng toàn trường.",
+                    CreatedByUserId = admin.UserId,
+                    CreatedAt = now.AddDays(-40)
+                };
 
-                    context.VaccinationCampaigns.Add(camp);
-                    await context.SaveChangesAsync();
-                }
+                context.VaccinationCampaigns.Add(campaign);
+                context.SaveChanges();
 
-                var existingTargetClassIds = await context.VaccinationCampaignTargetClasses
-                    .AsNoTracking()
-                    .Where(x => x.CampaignId == camp.CampaignId)
-                    .Select(x => x.ClassId)
-                    .ToHashSetAsync();
-
-                var missingTargets = classes
-                    .Where(c => !existingTargetClassIds.Contains(c.ClassId))
-                    .Select(c => new VaccinationCampaignTargetClass
-                    {
-                        CampaignId = camp.CampaignId,
-                        ClassId = c.ClassId
-                    })
-                    .ToList();
-
-                if (missingTargets.Count > 0)
+                context.VaccinationCampaignTargetClasses.AddRange(classes.Select(cls => new VaccinationCampaignTargetClass
                 {
-                    context.VaccinationCampaignTargetClasses.AddRange(missingTargets);
-                    await context.SaveChangesAsync();
-                }
+                    CampaignId = campaign.CampaignId,
+                    ClassId = cls.ClassId
+                }));
 
-                var existingVaccineUserIds = await context.StudentVaccinations
-                    .AsNoTracking()
-                    .Where(x => x.CampaignId == camp.CampaignId && x.UserId >= 100)
-                    .Select(x => x.UserId)
-                    .ToHashSetAsync();
-
-                var records = new List<StudentVaccination>();
-
-                foreach (var s in students)
+                var records = students.Select(student =>
                 {
-                    if (existingVaccineUserIds.Contains(s.UserId))
-                    {
-                        continue;
-                    }
+                    var status = campaign.Status == "COMPLETED"
+                        ? random.Next(100) switch
+                        {
+                            < 82 => "DONE",
+                            < 90 => "ABSENT",
+                            < 96 => "POSTPONED",
+                            _ => "CONTRAINDICATED"
+                        }
+                        : random.Next(100) switch
+                        {
+                            < 76 => "PENDING",
+                            < 86 => "POSTPONED",
+                            < 94 => "DONE",
+                            _ => "CONTRAINDICATED"
+                        };
 
-                    var status = random.Next(100) switch
+                    return new StudentVaccination
                     {
-                        < 70 => "DONE",
-                        < 82 => "PENDING",
-                        < 90 => "POSTPONED",
-                        < 96 => "ABSENT",
-                        _ => "CONTRAINDICATED"
-                    };
-
-                    records.Add(new StudentVaccination
-                    {
-                        UserId = s.UserId,
-                        CampaignId = camp.CampaignId,
+                        UserId = student.UserId,
+                        CampaignId = campaign.CampaignId,
                         VaccinationId = spec.Vaccine.VaccinationId,
                         Status = status,
-                        VaccinatedAt = status == "DONE" ? camp.ScheduledDate : null,
-                        LotNumber = status == "DONE" ? $"LOT-{spec.Code}-{(s.UserId % 35) + 1:D2}" : null,
-                        Note = "Seed vaccination record",
-                        UpdatedAt = DateTime.UtcNow
+                        VaccinatedAt = status == "DONE" ? spec.Date : null,
+                        LotNumber = status == "DONE" ? $"LOT-{spec.Code}-{student.UserId % 50 + 1:D2}" : null,
+                        Note = status == "CONTRAINDICATED" ? "Chống chỉ định tạm thời theo khai báo y tế." : "Dữ liệu seed.",
+                        UpdatedAt = now
+                    };
+                }).ToList();
+
+                context.StudentVaccinations.AddRange(records);
+            }
+        }
+
+        private static void SeedNotifications(AppDbContext context, User admin, List<User> nurses, List<Student> students, List<SchoolClass> classes, List<DiseaseType> diseases, List<Vaccination> vaccinations, DateTime now)
+        {
+            var notifications = new List<Notification>
+            {
+                new()
+                {
+                    Title = "Lịch kiểm tra sức khỏe định kỳ học kỳ II",
+                    Content = "Nhà trường tổ chức kiểm tra chiều cao, cân nặng và sức khỏe tổng quát cho học sinh trong tuần tới.",
+                    Type = "HEALTH_CHECK",
+                    Visibility = "BOTH",
+                    Status = "PUBLISHED",
+                    CreatedByUserId = admin.UserId,
+                    CreatedAt = now.AddDays(-5),
+                    PublishedAt = now.AddDays(-5),
+                    ClassId = classes.First().ClassId
+                },
+                new()
+                {
+                    Title = "Khuyến cáo phòng cúm mùa",
+                    Content = "Phụ huynh vui lòng nhắc học sinh rửa tay thường xuyên, đeo khẩu trang khi có triệu chứng ho sốt.",
+                    Type = "DISEASE_ALERT",
+                    Visibility = "PUBLIC",
+                    Status = "PUBLISHED",
+                    CreatedByUserId = admin.UserId,
+                    CreatedAt = now.AddDays(-3),
+                    PublishedAt = now.AddDays(-3),
+                    DiseaseId = diseases.Single(x => x.Code == "DIS002").DiseaseId
+                },
+                new()
+                {
+                    Title = "Thông báo chiến dịch tiêm vaccine cúm mùa",
+                    Content = "Nhà trường triển khai chiến dịch tiêm vaccine cúm mùa cho học sinh toàn trường.",
+                    Type = "VACCINATION",
+                    Visibility = "INTERNAL",
+                    Status = "PUBLISHED",
+                    CreatedByUserId = admin.UserId,
+                    CreatedAt = now.AddDays(-2),
+                    PublishedAt = now.AddDays(-2),
+                    VaccinationId = vaccinations.Single(x => x.Name == "Cúm mùa").VaccinationId
+                },
+                new()
+                {
+                    Title = "Dự thảo thông báo họp phụ huynh về y tế học đường",
+                    Content = "Nội dung dự kiến trao đổi về quy trình chăm sóc sức khỏe học sinh.",
+                    Type = "GENERAL",
+                    Visibility = "INTERNAL",
+                    Status = "DRAFT",
+                    CreatedByUserId = admin.UserId,
+                    CreatedAt = now.AddDays(-1)
+                }
+            };
+
+            context.Notifications.AddRange(notifications);
+            context.SaveChanges();
+
+            var internalUsers = nurses.Concat(students.Take(60).Select(x => x.User)).ToList();
+            var recipients = new List<NotificationRecipient>();
+
+            foreach (var notification in notifications.Where(x => x.Status == "PUBLISHED" && x.Visibility != "PUBLIC"))
+            {
+                foreach (var user in internalUsers)
+                {
+                    recipients.Add(new NotificationRecipient
+                    {
+                        NotificationId = notification.NotificationId,
+                        UserId = user.UserId,
+                        IsRead = user.UserId % 4 == 0,
+                        ReadAt = user.UserId % 4 == 0 ? now.AddHours(-user.UserId % 24) : null,
+                        SentAt = notification.PublishedAt ?? notification.CreatedAt,
+                        Status = "SENT"
                     });
                 }
-
-                if (records.Count > 0)
-                {
-                    context.StudentVaccinations.AddRange(records);
-                    await context.SaveChangesAsync();
-                }
-            }
-        }
-
-        private static async Task SeedUsersAsync(AppDbContext context)
-        {
-            if (await context.Users.AnyAsync()) return;
-
-            var admin = new User
-            {
-                Code = "USR001",
-                Username = "admin",
-                Phone = "0900000001",
-                Role = "ADMIN",
-                FullName = "System Admin",  
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "admin@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456Aa@"),
-                Avatar = null
-            };
-
-            var nurse = new User
-            {
-                Code = "USR002",
-                Username = "nurse01",
-                Phone = "0900000002",
-                Role = "NURSE",
-                FullName = "Nguyễn Thị Lan",
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "nurse01@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456"),
-                Avatar = null
-            };
-
-            var studentUser = new User
-            {
-                Code = "USR003",
-                Username = "HS001",
-                Phone = "0900000003",
-                Role = "STUDENT",
-                FullName = "Trần Văn An",
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "hs001@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456"),
-                Avatar = null,
-                Gender = "MALE"
-            };
-
-            var nurse2 = new User
-            {
-                Code = "USR004",
-                Username = "nurse02",
-                Phone = "0900000004",
-                Role = "NURSE",
-                FullName = "Lê Thị Mai",
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "nurse02@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456"),
-                Avatar = null
-            };
-
-            var studentUser2 = new User
-            {
-                Code = "USR005",
-                Username = "HS002",
-                Phone = "0900000005",
-                Role = "STUDENT",
-                FullName = "Ngô Thị Bích",
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "hs002@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456"),
-                Avatar = null,
-                Gender = "FEMALE"
-            };
-
-            var studentUser3 = new User
-            {
-                Code = "USR006",
-                Username = "HS003",
-                Phone = "0900000006",
-                Role = "STUDENT",
-                FullName = "Phạm Minh Khang",
-                IsActive = true,
-                Status = "ACTIVE",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Email = "hs003@eduhealth.local",
-                PasswordHash = PasswordHelper.HashPassword("123456"),
-                Avatar = null,
-                Gender = "MALE"
-            };
-
-            context.Users.AddRange(admin, nurse, studentUser, nurse2, studentUser2, studentUser3);
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedSchoolClassesAsync(AppDbContext context)
-        {
-            if (await context.SchoolClasses.AnyAsync()) return;
-
-            var cls1 = new SchoolClass
-            {
-                Code = "CLS001",
-                ClassName = "4/2",
-                Grade = "4",
-                TeacherName = "Cô A",
-                TeacherPhone = "0911111111"
-            };
-
-            var cls2 = new SchoolClass
-            {
-                Code = "CLS002",
-                ClassName = "4/3",
-                Grade = "4",
-                TeacherName = "Cô B",
-                TeacherPhone = "0922222222"
-            };
-
-            var cls3 = new SchoolClass
-            {
-                Code = "CLS003",
-                ClassName = "5/1",
-                Grade = "5",
-                TeacherName = "Cô C",
-                TeacherPhone = "0933333333"
-            };
-
-            context.SchoolClasses.AddRange(cls1, cls2, cls3);
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedDiseaseTypesAsync(AppDbContext context)
-        {
-            if (await context.DiseaseTypes.AnyAsync()) return;
-
-            var dis1 = new DiseaseType
-            {
-                Code = "DIS001",
-                DiseaseName = "Cảm cúm",
-                Description = "Triệu chứng cảm cúm",
-                StandardTreatment = "Nghỉ ngơi, uống nhiều nước"
-            };
-
-            var dis2 = new DiseaseType
-            {
-                Code = "DIS002",
-                DiseaseName = "Đau bụng",
-                Description = "Đau bụng nhẹ",
-                StandardTreatment = "Theo dõi, bù nước"
-            };
-
-            var dis3 = new DiseaseType
-            {
-                Code = "DIS003",
-                DiseaseName = "Sốt",
-                Description = "Sốt nhẹ",
-                StandardTreatment = "Theo dõi thân nhiệt, dùng hạ sốt khi cần"
-            };
-
-            context.DiseaseTypes.AddRange(dis1, dis2, dis3);
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedAllergyTypesAsync(AppDbContext context)
-        {
-            if (await context.AllergyTypes.AnyAsync()) return;
-
-            context.AllergyTypes.AddRange(
-                new AllergyType { AllergyName = "Dị ứng hải sản", Severity = "HIGH" },
-                new AllergyType { AllergyName = "Dị ứng thuốc", Severity = "MEDIUM" },
-                new AllergyType { AllergyName = "Dị ứng phấn hoa", Severity = "LOW" }
-            );
-
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedVaccinationsAsync(AppDbContext context)
-        {
-            if (await context.Vaccinations.AnyAsync()) return;
-
-            context.Vaccinations.AddRange(
-                new Vaccination { Name = "COVID-19", Description = "Vắc xin phòng COVID-19", CreatedAt = DateTime.UtcNow },
-                new Vaccination { Name = "Sởi", Description = "Vắc xin phòng bệnh sởi", CreatedAt = DateTime.UtcNow },
-                new Vaccination { Name = "Uốn ván", Description = "Vắc xin phòng uốn ván", CreatedAt = DateTime.UtcNow }
-            );
-
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedMedicinesAsync(AppDbContext context)
-        {
-            if (await context.Medicines.AnyAsync()) return;
-
-            var med1 = new Medicine
-            {
-                Code = "MED001",
-                Name = "Paracetamol 500mg",
-                ActiveIngredient = "Paracetamol",
-                Unit = "VIEN",
-                Packaging = "Hộp 10 vỉ",
-                WarningThreshold = 50,
-                StockQuantity = 200,
-                Status = "ACTIVE",
-                Note = "Dùng hạ sốt, giảm đau",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            var med2 = new Medicine
-            {
-                Code = "MED002",
-                Name = "ORS",
-                ActiveIngredient = "Oresol",
-                Unit = "GOI",
-                Packaging = "Hộp 24 gói",
-                WarningThreshold = 20,
-                StockQuantity = 100,
-                Status = "ACTIVE",
-                Note = "Bù nước",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            var med3 = new Medicine
-            {
-                Code = "MED003",
-                Name = "Vitamin C 100mg",
-                ActiveIngredient = "Ascorbic acid",
-                Unit = "VIEN",
-                Packaging = "Lọ 100 viên",
-                WarningThreshold = 30,
-                StockQuantity = 80,
-                Status = "ACTIVE",
-                Note = "Bổ sung vitamin",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            context.Medicines.AddRange(med1, med2, med3);
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedStudentsAndRelationsAsync(AppDbContext context)
-        {
-            if (await context.Students.AnyAsync()) return;
-
-            var cls1 = await context.SchoolClasses.FirstOrDefaultAsync(x => x.Code == "CLS001");
-            var cls2 = await context.SchoolClasses.FirstOrDefaultAsync(x => x.Code == "CLS002");
-
-            var u1 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR003");
-            var u2 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR005");
-            var u3 = await context.Users.FirstOrDefaultAsync(x => x.Code == "USR006");
-
-            if (cls1 == null || cls2 == null || u1 == null || u2 == null || u3 == null) return;
-
-            var s1 = new Student
-            {
-                UserId = u1.UserId,
-                Code = "STD001",
-                ClassId = cls1.ClassId,
-                FullName = u1.FullName,
-                DateOfBirth = new DateTime(2016, 9, 12),
-                CurrentHeight = 130,
-                CurrentWeight = 30.1f,
-                Guardian = "Phụ huynh 1",
-                Phone = u1.Phone
-            };
-
-            var s2 = new Student
-            {
-                UserId = u2.UserId,
-                Code = "STD002",
-                ClassId = cls1.ClassId,
-                FullName = u2.FullName,
-                DateOfBirth = new DateTime(2016, 3, 20),
-                CurrentHeight = 128,
-                CurrentWeight = 28.5f,
-                Guardian = "Phụ huynh 2",
-                Phone = u2.Phone
-            };
-
-            var s3 = new Student
-            {
-                UserId = u3.UserId,
-                Code = "STD003",
-                ClassId = cls2.ClassId,
-                FullName = u3.FullName,
-                DateOfBirth = new DateTime(2015, 11, 2),
-                CurrentHeight = 135,
-                CurrentWeight = 32.0f,
-                Guardian = "Phụ huynh 3",
-                Phone = u3.Phone
-            };
-
-            context.Students.AddRange(s1, s2, s3);
-            await context.SaveChangesAsync();
-
-            var allergy1 = await context.AllergyTypes.FirstOrDefaultAsync();
-            var allergy2 = await context.AllergyTypes.Skip(1).FirstOrDefaultAsync();
-
-            if (allergy1 != null && allergy2 != null)
-            {
-                context.StudentAllergies.AddRange(
-                    new StudentAllergy { UserId = s1.UserId, AllergyId = allergy1.AllergyId, Note = "Nổi mề đay" },
-                    new StudentAllergy { UserId = s2.UserId, AllergyId = allergy2.AllergyId, Note = "Mẩn đỏ" }
-                );
             }
 
-            var vac1 = await context.Vaccinations.FirstOrDefaultAsync();
-            var vac2 = await context.Vaccinations.Skip(1).FirstOrDefaultAsync();
+            context.NotificationRecipients.AddRange(recipients);
+        }
 
-            if (vac1 != null && vac2 != null)
+        private static async Task SeedMessagingAsync(AppDbContext context, User admin, List<User> nurses, List<Student> students, DateTime now)
+        {
+            var conversations = new List<Conversation>();
+
+            for (var i = 0; i < 8; i++)
             {
-                context.StudentVaccinations.AddRange(
-                    new StudentVaccination { UserId = s1.UserId, VaccinationId = vac1.VaccinationId, Status = "DONE" },
-                    new StudentVaccination { UserId = s1.UserId, VaccinationId = vac2.VaccinationId, Status = "DONE" }
-                );
+                conversations.Add(new Conversation
+                {
+                    ConversationType = "DIRECT",
+                    StudentUserId = students[i].UserId,
+                    Title = $"Trao đổi sức khỏe học sinh {students[i].FullName}",
+                    CreatedByUserId = nurses[i % nurses.Count].UserId,
+                    CreatedAt = now.AddDays(-8 + i),
+                    UpdatedAt = now.AddDays(-7 + i)
+                });
             }
 
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedHealthVisitsAsync(AppDbContext context)
-        {
-            if (await context.HealthVisits.AnyAsync()) return;
-
-            var nurse = await context.Users.FirstOrDefaultAsync(x => x.Role == "NURSE");
-            var student = await context.Students.FirstOrDefaultAsync();
-            var dis = await context.DiseaseTypes.FirstOrDefaultAsync();
-            var med1 = await context.Medicines.FirstOrDefaultAsync(x => x.Code == "MED001");
-            var med2 = await context.Medicines.FirstOrDefaultAsync(x => x.Code == "MED002");
-
-            if (nurse == null || student == null || dis == null || med1 == null || med2 == null) return;
-
-            var visit = new HealthVisit
+            conversations.Add(new Conversation
             {
-                Code = "VIS001",
-                StudentUserId = student.UserId,
-                NurseId = nurse.UserId,
-                VisitDate = DateTime.UtcNow.AddDays(-1),
-                DiseaseId = dis.DiseaseId,
-                Diagnosis = dis.DiseaseName,
-                Treatment = "Theo dõi, chăm sóc tại phòng y tế",
-                Note = "Dữ liệu seed",
-                Symptoms = "Sốt nhẹ",
-                MeasuredHeight = student.CurrentHeight,
-                MeasuredWeight = student.CurrentWeight
-            };
-
-            context.HealthVisits.Add(visit);
-            await context.SaveChangesAsync();
-
-            context.VisitPrescriptions.AddRange(
-                new VisitPrescription { VisitId = visit.VisitId, MedicineId = med1.MedicineId, Quantity = 2, UsageIns = "1 viên/lần, 2 lần/ngày" },
-                new VisitPrescription { VisitId = visit.VisitId, MedicineId = med2.MedicineId, Quantity = 1, UsageIns = "1 gói/ngày" }
-            );
-
-            context.MedicineStockLogs.AddRange(
-                new MedicineStockLog
-                {
-                    MedicineId = med1.MedicineId,
-                    Type = "DISPENSE",
-                    Quantity = 2,
-                    StockBefore = med1.StockQuantity,
-                    StockAfter = med1.StockQuantity - 2,
-                    UserId = nurse.UserId,
-                    CreatedAt = DateTime.UtcNow,
-                    VisitId = visit.VisitId
-                },
-                new MedicineStockLog
-                {
-                    MedicineId = med2.MedicineId,
-                    Type = "DISPENSE",
-                    Quantity = 1,
-                    StockBefore = med2.StockQuantity,
-                    StockAfter = med2.StockQuantity - 1,
-                    UserId = nurse.UserId,
-                    CreatedAt = DateTime.UtcNow,
-                    VisitId = visit.VisitId
-                }
-            );
-
-            med1.StockQuantity -= 2;
-            med2.StockQuantity -= 1;
-
-            await context.SaveChangesAsync();
-        }
-
-        private static async Task SeedNotificationsAsync(AppDbContext context)
-        {
-            if (await context.Notifications.AnyAsync()) return;
-
-            var admin = await context.Users.FirstOrDefaultAsync(x => x.Role == "ADMIN");
-            var nurse = await context.Users.FirstOrDefaultAsync(x => x.Role == "NURSE");
-            var studentUser = await context.Users.FirstOrDefaultAsync(x => x.Role == "STUDENT");
-
-            if (admin == null || nurse == null || studentUser == null) return;
-
-            var noti = new Notification
-            {
-                Title = "Thông báo kiểm tra sức khỏe",
-                Content = "Nhà trường tổ chức kiểm tra sức khỏe định kỳ.",
-                Type = "GENERAL",
-                Visibility = "INTERNAL",
-                Status = "PUBLISHED",
+                ConversationType = "GROUP",
+                Title = "Tổ y tế trường Tiểu học EduHealth",
                 CreatedByUserId = admin.UserId,
-                CreatedAt = DateTime.UtcNow,
-                PublishedAt = DateTime.UtcNow
-            };
+                CreatedAt = now.AddDays(-10),
+                UpdatedAt = now.AddDays(-1)
+            });
 
-            context.Notifications.Add(noti);
+            context.Conversations.AddRange(conversations);
             await context.SaveChangesAsync();
 
-            context.NotificationRecipients.AddRange(
-                new NotificationRecipient
+            var participants = new List<ConversationParticipant>();
+            foreach (var conversation in conversations.Take(8))
+            {
+                participants.Add(new ConversationParticipant
                 {
-                    NotificationId = noti.NotificationId,
-                    UserId = nurse.UserId,
-                    IsRead = false,
-                    SentAt = DateTime.UtcNow,
-                    Status = "SENT"
+                    ConversationId = conversation.ConversationId,
+                    UserId = conversation.CreatedByUserId,
+                    RoleInConversation = "NURSE",
+                    JoinedAt = conversation.CreatedAt,
+                    LastReadAt = now.AddDays(-1),
+                    IsPinned = conversation.ConversationId % 2 == 0
+                });
+
+                participants.Add(new ConversationParticipant
+                {
+                    ConversationId = conversation.ConversationId,
+                    UserId = conversation.StudentUserId!.Value,
+                    RoleInConversation = "STUDENT",
+                    JoinedAt = conversation.CreatedAt,
+                    LastReadAt = now.AddDays(-2),
+                    IsPinned = false
+                });
+            }
+
+            var group = conversations.Last();
+            participants.Add(new ConversationParticipant
+            {
+                ConversationId = group.ConversationId,
+                UserId = admin.UserId,
+                RoleInConversation = "ADMIN",
+                JoinedAt = group.CreatedAt,
+                LastReadAt = now,
+                IsPinned = true
+            });
+            participants.AddRange(nurses.Select(nurse => new ConversationParticipant
+            {
+                ConversationId = group.ConversationId,
+                UserId = nurse.UserId,
+                RoleInConversation = "NURSE",
+                JoinedAt = group.CreatedAt,
+                LastReadAt = now.AddHours(-2),
+                IsPinned = false
+            }));
+
+            context.ConversationParticipants.AddRange(participants);
+            await context.SaveChangesAsync();
+
+            var messages = new List<ChatMessage>();
+            foreach (var conversation in conversations.Take(8))
+            {
+                messages.Add(new ChatMessage
+                {
+                    ConversationId = conversation.ConversationId,
+                    SenderUserId = conversation.CreatedByUserId,
+                    Content = "Nhân viên y tế đã ghi nhận tình trạng sức khỏe của học sinh, phụ huynh vui lòng theo dõi thêm tại nhà.",
+                    MessageType = "TEXT",
+                    SentAt = conversation.CreatedAt.AddMinutes(12)
+                });
+
+                messages.Add(new ChatMessage
+                {
+                    ConversationId = conversation.ConversationId,
+                    SenderUserId = conversation.StudentUserId!.Value,
+                    Content = "Em đã báo lại với phụ huynh và sẽ tiếp tục theo dõi triệu chứng.",
+                    MessageType = "TEXT",
+                    SentAt = conversation.CreatedAt.AddMinutes(25)
+                });
+            }
+
+            messages.Add(new ChatMessage
+            {
+                ConversationId = group.ConversationId,
+                SenderUserId = admin.UserId,
+                Content = "Tuần này tổ y tế kiểm tra lại hạn dùng thuốc và cập nhật tồn kho trước thứ Sáu.",
+                MessageType = "TEXT",
+                SentAt = now.AddDays(-2)
+            });
+
+            context.ChatMessages.AddRange(messages);
+            await context.SaveChangesAsync();
+
+            var attachmentMessage = messages.First();
+            context.ChatMessageAttachments.Add(new ChatMessageAttachment
+            {
+                MessageId = attachmentMessage.MessageId,
+                FileName = "health-note-sample.pdf",
+                OriginalFileName = "Phieu-theo-doi-suc-khoe-mau.pdf",
+                FileUrl = "https://example.com/eduhealth/health-note-sample.pdf",
+                ContentType = "application/pdf",
+                SizeBytes = 245_760,
+                UploadedByUserId = attachmentMessage.SenderUserId,
+                UploadedAt = attachmentMessage.SentAt.AddMinutes(1)
+            });
+
+            foreach (var conversation in conversations)
+            {
+                conversation.LastMessageId = messages
+                    .Where(x => x.ConversationId == conversation.ConversationId)
+                    .OrderByDescending(x => x.SentAt)
+                    .Select(x => x.MessageId)
+                    .FirstOrDefault();
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        private static void SeedSystemLogs(AppDbContext context, User admin, List<User> nurses, DateTime now)
+        {
+            context.SystemLogs.AddRange(
+                new SystemLog
+                {
+                    CreatedAt = now.AddDays(-20),
+                    ActorUserId = admin.UserId,
+                    ActorName = admin.FullName,
+                    ActorUsername = admin.Username,
+                    ActorRole = admin.Role,
+                    Module = "Seed",
+                    Action = "InitializeSchoolData",
+                    TargetType = "Database",
+                    TargetId = "EduHealthDb",
+                    TargetLabel = "Khởi tạo dữ liệu trường học",
+                    Description = "Seed dữ liệu demo cho trường 5 khối, 10 lớp, 305 học sinh.",
+                    Status = "SUCCESS",
+                    MetadataJson = "{\"source\":\"DbSeeder\"}"
                 },
-                new NotificationRecipient
+                new SystemLog
                 {
-                    NotificationId = noti.NotificationId,
-                    UserId = studentUser.UserId,
-                    IsRead = false,
-                    SentAt = DateTime.UtcNow,
-                    Status = "SENT"
-                }
-            );
+                    CreatedAt = now.AddDays(-10),
+                    ActorUserId = nurses.First().UserId,
+                    ActorName = nurses.First().FullName,
+                    ActorUsername = nurses.First().Username,
+                    ActorRole = nurses.First().Role,
+                    Module = "Medicine",
+                    Action = "StockIn",
+                    TargetType = "MedicineStock",
+                    TargetId = "INITIAL",
+                    TargetLabel = "Nhập kho đầu năm học",
+                    Description = "Ghi nhận tồn kho ban đầu cho tủ thuốc y tế học đường.",
+                    Status = "SUCCESS",
+                    MetadataJson = "{\"type\":\"STOCK_IN\"}"
+                });
+        }
 
-            await context.SaveChangesAsync();
+        private static float OneDecimal(double value)
+        {
+            return (float)Math.Round(value, 1, MidpointRounding.AwayFromZero);
         }
     }
 }
