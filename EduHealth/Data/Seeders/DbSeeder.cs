@@ -39,13 +39,16 @@ namespace EduHealth.Data.Seeders
             SeedStudentAllergies(context, students, allergyTypes, random);
             await context.SaveChangesAsync();
 
-            SeedMedicineStockInLogs(context, medicines, nurses, now);
+            var medicineBatches = SeedMedicineBatches(context, medicines, nurses, now);
+            await context.SaveChangesAsync();
+
+            SeedMedicineStockInLogs(context, medicineBatches, nurses);
             await context.SaveChangesAsync();
 
             var visits = SeedHealthVisits(context, students, nurses, diseases, random, now);
             await context.SaveChangesAsync();
 
-            SeedVisitPrescriptionsAndDispenseLogs(context, visits, medicines, nurses, random, now);
+            SeedVisitPrescriptionsAndDispenseLogs(context, visits, medicines, medicineBatches, nurses, random, now);
             await context.SaveChangesAsync();
 
             SeedVaccinationCampaigns(context, admin, classes, students, vaccinations, random, now);
@@ -340,7 +343,82 @@ namespace EduHealth.Data.Seeders
             context.StudentAllergies.AddRange(records);
         }
 
-        private static void SeedMedicineStockInLogs(AppDbContext context, List<Medicine> medicines, List<User> nurses, DateTime now)
+        private static List<MedicineBatch> SeedMedicineBatches(
+            AppDbContext context,
+            List<Medicine> medicines,
+            List<User> nurses,
+            DateTime now)
+        {
+            var batches = new List<MedicineBatch>();
+
+            foreach (var (medicine, medicineIndex) in medicines.Select((medicine, index) => (medicine, index)))
+            {
+                var firstQuantity = Math.Max(1, medicine.StockQuantity * 40 / 100);
+                var secondQuantity = medicine.StockQuantity - firstQuantity;
+                var baseExpiry = medicine.NearestExpiryDate ?? DateOnly.FromDateTime(now.AddDays(365));
+                var quantities = secondQuantity > 0
+                    ? new[] { firstQuantity, secondQuantity }
+                    : new[] { firstQuantity };
+
+                for (var batchIndex = 0; batchIndex < quantities.Length; batchIndex++)
+                {
+                    batches.Add(new MedicineBatch
+                    {
+                        Code = $"MBT{batches.Count + 1:D6}",
+                        MedicineId = medicine.MedicineId,
+                        BatchNumber = $"LOT-{now:yyyy}-{medicine.MedicineId:D3}-{batchIndex + 1:D2}",
+                        ReceivedAt = now.AddDays(-120 + medicineIndex % 15 + batchIndex * 10),
+                        ExpiryDate = baseExpiry.AddDays(batchIndex * 90),
+                        InitialQuantity = quantities[batchIndex],
+                        RemainingQuantity = quantities[batchIndex],
+                        Status = "ACTIVE",
+                        Note = batchIndex == 0 ? "FEFO priority batch" : "Supplemental batch",
+                        CreatedByUserId = nurses[medicineIndex % nurses.Count].UserId,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    });
+                }
+            }
+
+            context.MedicineBatches.AddRange(batches);
+            return batches;
+        }
+
+        private static void SeedMedicineStockInLogs(
+            AppDbContext context,
+            List<MedicineBatch> batches,
+            List<User> nurses)
+        {
+            var stockByMedicine = new Dictionary<int, int>();
+            var logs = new List<MedicineStockLog>();
+
+            foreach (var (batch, index) in batches.Select((batch, index) => (batch, index)))
+            {
+                var stockBefore = stockByMedicine.GetValueOrDefault(batch.MedicineId);
+                var stockAfter = stockBefore + batch.InitialQuantity;
+                stockByMedicine[batch.MedicineId] = stockAfter;
+
+                logs.Add(new MedicineStockLog
+                {
+                    MedicineId = batch.MedicineId,
+                    MedicineBatchId = batch.MedicineBatchId,
+                    UserId = batch.CreatedByUserId ?? nurses[index % nurses.Count].UserId,
+                    Quantity = batch.InitialQuantity,
+                    StockBefore = stockBefore,
+                    StockAfter = stockAfter,
+                    Reason = "Initial school-year stock",
+                    ExpiryDate = batch.ExpiryDate,
+                    BatchNumber = batch.BatchNumber,
+                    CreatedAt = batch.ReceivedAt,
+                    Type = "STOCK_IN",
+                    Note = "Seed batch inventory"
+                });
+            }
+
+            context.MedicineStockLogs.AddRange(logs);
+        }
+
+        private static void SeedMedicineStockInLogsLegacy(AppDbContext context, List<Medicine> medicines, List<User> nurses, DateTime now)
         {
             var logs = medicines.Select((medicine, i) => new MedicineStockLog
             {
@@ -400,7 +478,101 @@ namespace EduHealth.Data.Seeders
             return visits;
         }
 
-        private static void SeedVisitPrescriptionsAndDispenseLogs(AppDbContext context, List<HealthVisit> visits, List<Medicine> medicines, List<User> nurses, Random random, DateTime now)
+        private static void SeedVisitPrescriptionsAndDispenseLogs(
+            AppDbContext context,
+            List<HealthVisit> visits,
+            List<Medicine> medicines,
+            List<MedicineBatch> medicineBatches,
+            List<User> nurses,
+            Random random,
+            DateTime now)
+        {
+            var prescriptions = new List<VisitPrescription>();
+            var dispenseLogs = new List<MedicineStockLog>();
+            var batchesByMedicine = medicineBatches
+                .GroupBy(x => x.MedicineId)
+                .ToDictionary(
+                    x => x.Key,
+                    x => x.OrderBy(b => b.ExpiryDate).ThenBy(b => b.ReceivedAt).ToList());
+            var totalStock = medicines.ToDictionary(x => x.MedicineId, x => x.StockQuantity);
+
+            foreach (var visit in visits)
+            {
+                var selected = medicines
+                    .Where(x => totalStock[x.MedicineId] > 0)
+                    .OrderBy(_ => random.Next())
+                    .Take(visit.VisitId % 3 == 0 ? 2 : 1)
+                    .ToList();
+
+                foreach (var medicine in selected)
+                {
+                    var requestedQuantity = medicine.Unit is "CHAI" or "HOP" or "CAI" ? 1 : random.Next(1, 4);
+                    var quantity = Math.Min(requestedQuantity, totalStock[medicine.MedicineId]);
+                    if (quantity <= 0)
+                        continue;
+
+                    prescriptions.Add(new VisitPrescription
+                    {
+                        VisitId = visit.VisitId,
+                        MedicineId = medicine.MedicineId,
+                        Quantity = quantity,
+                        UsageIns = medicine.Unit == "VIEN"
+                            ? "Uống sau ăn theo hướng dẫn nhân viên y tế."
+                            : "Sử dụng theo hướng dẫn tại phòng y tế."
+                    });
+
+                    var remainingToDispense = quantity;
+                    foreach (var batch in batchesByMedicine[medicine.MedicineId])
+                    {
+                        if (remainingToDispense == 0)
+                            break;
+                        if (batch.Status != "ACTIVE" || batch.RemainingQuantity <= 0)
+                            continue;
+
+                        var dispensed = Math.Min(batch.RemainingQuantity, remainingToDispense);
+                        var stockBefore = totalStock[medicine.MedicineId];
+                        batch.RemainingQuantity -= dispensed;
+                        batch.Status = batch.RemainingQuantity == 0 ? "DEPLETED" : "ACTIVE";
+                        batch.UpdatedAt = now;
+                        totalStock[medicine.MedicineId] -= dispensed;
+                        remainingToDispense -= dispensed;
+
+                        dispenseLogs.Add(new MedicineStockLog
+                        {
+                            MedicineId = medicine.MedicineId,
+                            MedicineBatchId = batch.MedicineBatchId,
+                            UserId = nurses[(visit.VisitId + medicine.MedicineId) % nurses.Count].UserId,
+                            Quantity = dispensed,
+                            StockBefore = stockBefore,
+                            StockAfter = totalStock[medicine.MedicineId],
+                            Reason = "Dispensed for seeded examination",
+                            ExpiryDate = batch.ExpiryDate,
+                            BatchNumber = batch.BatchNumber,
+                            CreatedAt = visit.VisitDate,
+                            Type = "DISPENSE",
+                            VisitId = visit.VisitId,
+                            Note = $"Seed dispense for {visit.Code}"
+                        });
+                    }
+                }
+            }
+
+            foreach (var medicine in medicines)
+            {
+                medicine.StockQuantity = totalStock[medicine.MedicineId];
+                medicine.NearestExpiryDate = batchesByMedicine[medicine.MedicineId]
+                    .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0)
+                    .OrderBy(x => x.ExpiryDate)
+                    .Select(x => (DateOnly?)x.ExpiryDate)
+                    .FirstOrDefault();
+                medicine.UpdatedAt = now;
+            }
+
+            context.VisitPrescriptions.AddRange(prescriptions);
+            context.MedicineStockLogs.AddRange(dispenseLogs);
+        }
+
+        private static void SeedVisitPrescriptionsAndDispenseLogsLegacy(AppDbContext context, List<HealthVisit> visits, List<Medicine> medicines, List<User> nurses, Random random, DateTime now)
         {
             var prescriptions = new List<VisitPrescription>();
             var dispenseLogs = new List<MedicineStockLog>();

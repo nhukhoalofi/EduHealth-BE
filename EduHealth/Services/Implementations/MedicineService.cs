@@ -1,8 +1,11 @@
+using EduHealth.Data;
 using EduHealth.Data.Entities;
 using EduHealth.DTOs.Medicines;
 using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace EduHealth.Services.Implementations
 {
@@ -10,16 +13,18 @@ namespace EduHealth.Services.Implementations
     {
         private static readonly HashSet<string> AllowedUnits = new(StringComparer.OrdinalIgnoreCase)
         {
-            "VIEN", "GOI", "CHAI", "HOP", "TUYP", "ONG", "LO"
+            "VIEN", "GOI", "CHAI", "HOP", "TUYP", "ONG", "LO", "CUON", "CAI"
         };
 
         private readonly IMedicineRepository _medicineRepository;
         private readonly ISystemLogWriter _logWriter;
+        private readonly AppDbContext _context;
 
-        public MedicineService(IMedicineRepository medicineRepository, ISystemLogWriter logWriter)
+        public MedicineService(IMedicineRepository medicineRepository, ISystemLogWriter logWriter, AppDbContext context)
         {
             _medicineRepository = medicineRepository;
             _logWriter = logWriter;
+            _context = context;
         }
 
         public async Task<(IReadOnlyList<MedicineListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(
@@ -29,7 +34,14 @@ namespace EduHealth.Services.Implementations
             var page = query.Page <= 0 ? 1 : query.Page;
             var pageSize = query.PageSize <= 0 ? 20 : Math.Min(query.PageSize, 100);
 
-            var (items, total) = await _medicineRepository.GetPagedAsync(query.Keyword, query.Status, query.LowStock, null, page, pageSize, cancellationToken);
+            var (items, total) = await _medicineRepository.GetPagedAsync(
+                query.Keyword,
+                query.Status,
+                query.LowStock,
+                query.Expiring,
+                page,
+                pageSize,
+                cancellationToken);
 
             var list = new List<MedicineListItemDto>(items.Count);
             var expiringThreshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
@@ -39,11 +51,6 @@ namespace EduHealth.Services.Implementations
                 var nearestExpiry = m.NearestExpiryDate;
                 var isLowStock = m.StockQuantity <= m.WarningThreshold;
                 var isExpiring = nearestExpiry.HasValue && nearestExpiry.Value <= expiringThreshold;
-
-                if (query.Expiring == true && !isExpiring)
-                {
-                    continue;
-                }
 
                 list.Add(new MedicineListItemDto
                 {
@@ -62,7 +69,7 @@ namespace EduHealth.Services.Implementations
             }
 
             var totalPages = total == 0 ? 0 : (int)Math.Ceiling((double)total / pageSize);
-            return (list, list.Count, totalPages, page, pageSize);
+            return (list, total, totalPages, page, pageSize);
         }
 
         public async Task<(bool Found, MedicineDetailDto? Data)> GetDetailAsync(string id, CancellationToken cancellationToken = default)
@@ -73,8 +80,18 @@ namespace EduHealth.Services.Implementations
                 return (false, null);
             }
 
+            await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+            var batches = await _medicineRepository.GetBatchesAsync(medicine.MedicineId, cancellationToken);
             var nearestExpiry = medicine.NearestExpiryDate;
+            var today = VietnamTimeHelper.TodayDateOnly;
             var expiringThreshold = VietnamTimeHelper.TodayDateOnly.AddDays(30);
+            var fefoBatchId = batches
+                .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0 && x.ExpiryDate >= today)
+                .OrderBy(x => x.ExpiryDate)
+                .ThenBy(x => x.ReceivedAt)
+                .Select(x => (int?)x.MedicineBatchId)
+                .FirstOrDefault();
 
             var dto = new MedicineDetailDto
             {
@@ -90,6 +107,24 @@ namespace EduHealth.Services.Implementations
                 Note = medicine.Note,
                 IsLowStock = medicine.StockQuantity <= medicine.WarningThreshold,
                 IsExpiringSoon = nearestExpiry.HasValue && nearestExpiry.Value <= expiringThreshold,
+                Batches = batches.Select(x =>
+                {
+                    var isExpired = x.ExpiryDate < today;
+                    return new MedicineBatchItemDto
+                    {
+                        Id = x.Code,
+                        BatchNumber = x.BatchNumber,
+                        ReceivedAt = x.ReceivedAt,
+                        ExpiryDate = x.ExpiryDate,
+                        InitialQuantity = x.InitialQuantity,
+                        RemainingQuantity = x.RemainingQuantity,
+                        Status = isExpired && x.RemainingQuantity > 0 && x.Status == "ACTIVE" ? "EXPIRED" : x.Status,
+                        Note = x.Note,
+                        IsExpired = isExpired,
+                        IsExpiringSoon = !isExpired && x.ExpiryDate <= expiringThreshold && x.RemainingQuantity > 0 && x.Status == "ACTIVE",
+                        IsFefoPriority = fefoBatchId == x.MedicineBatchId
+                    };
+                }).ToList(),
                 CreatedAt = medicine.CreatedAt,
                 UpdatedAt = medicine.UpdatedAt
             };
@@ -98,10 +133,19 @@ namespace EduHealth.Services.Implementations
         }
 
         public async Task<(bool Success, int? StatusCode, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, MedicineDetailDto? Data)> CreateAsync(
+            int performedByUserId,
             CreateMedicineRequestDto request,
             CancellationToken cancellationToken = default)
         {
             var errors = new List<(string Field, string Code, string Message)>();
+
+            if (request.InitialQuantity.HasValue || request.ExpiryDate.HasValue || !string.IsNullOrWhiteSpace(request.BatchNumber))
+            {
+                if (!request.InitialQuantity.HasValue || request.InitialQuantity.Value <= 0)
+                    errors.Add(("initialQuantity", "INVALID_QUANTITY", "initialQuantity must be greater than 0."));
+                if (!request.ExpiryDate.HasValue || request.ExpiryDate.Value <= VietnamTimeHelper.TodayDateOnly)
+                    errors.Add(("expiryDate", "INVALID_EXPIRY_DATE", "expiryDate must be later than today."));
+            }
 
             if (string.IsNullOrWhiteSpace(request.Name))
                 errors.Add(("name", "REQUIRED", "name bắt buộc."));
@@ -117,8 +161,26 @@ namespace EduHealth.Services.Implementations
 
             var name = request.Name.Trim();
 
-            if (await _medicineRepository.AnyNameAsync(name, null, cancellationToken))
+            var existingMedicine = await _medicineRepository.GetByNameAsync(name, cancellationToken);
+            if (existingMedicine is not null)
             {
+                if (request.InitialQuantity.HasValue && request.ExpiryDate.HasValue)
+                {
+                    var stockInResult = await StockInAsync(existingMedicine.Code, performedByUserId, new StockInMedicineRequestDto
+                    {
+                        Quantity = request.InitialQuantity.Value,
+                        ExpiryDate = request.ExpiryDate.Value,
+                        BatchNumber = request.BatchNumber,
+                        Note = request.Note
+                    }, cancellationToken);
+
+                    if (!stockInResult.Success)
+                        return (false, 400, stockInResult.Message, stockInResult.Errors, null);
+
+                    var existingDetail = (await GetDetailAsync(existingMedicine.Code, cancellationToken)).Data;
+                    return (true, 200, "Medicine already existed; a new batch was added.", Array.Empty<(string, string, string)>(), existingDetail);
+                }
+
                 return (false, 409, "Thuốc đã tồn tại.", new[] { ("name", "MEDICINE_ALREADY_EXISTS", "Tên thuốc đã tồn tại trong hệ thống.") }, null);
             }
 
@@ -139,16 +201,66 @@ namespace EduHealth.Services.Implementations
                 UpdatedAt = now
             };
 
-            await _medicineRepository.AddAsync(medicine, cancellationToken);
-            await _medicineRepository.SaveChangesAsync(cancellationToken);
+            await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            try
+            {
+                await _medicineRepository.AddAsync(medicine, cancellationToken);
+                await _medicineRepository.SaveChangesAsync(cancellationToken);
 
-            medicine.Code = $"MED{medicine.MedicineId:D3}";
-            _medicineRepository.Update(medicine);
-            await _medicineRepository.SaveChangesAsync(cancellationToken);
+                medicine.Code = $"MED{medicine.MedicineId:D3}";
+                _medicineRepository.Update(medicine);
+
+                if (request.InitialQuantity.HasValue && request.ExpiryDate.HasValue)
+                {
+                    var batch = new MedicineBatch
+                    {
+                        Code = GenerateTemporaryBatchCode(),
+                        MedicineId = medicine.MedicineId,
+                        BatchNumber = request.BatchNumber?.Trim(),
+                        ReceivedAt = now,
+                        ExpiryDate = request.ExpiryDate.Value,
+                        InitialQuantity = request.InitialQuantity.Value,
+                        RemainingQuantity = request.InitialQuantity.Value,
+                        Status = "ACTIVE",
+                        Note = request.Note?.Trim(),
+                        CreatedByUserId = performedByUserId > 0 ? performedByUserId : null,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    };
+                    await _medicineRepository.AddBatchAsync(batch, cancellationToken);
+                    await _medicineRepository.SaveChangesAsync(cancellationToken);
+                    batch.Code = $"MBT{batch.MedicineBatchId:D6}";
+
+                    await _medicineRepository.AddMovementAsync(new MedicineStockLog
+                    {
+                        MedicineId = medicine.MedicineId,
+                        MedicineBatchId = batch.MedicineBatchId,
+                        UserId = performedByUserId,
+                        Quantity = batch.InitialQuantity,
+                        StockBefore = 0,
+                        StockAfter = batch.InitialQuantity,
+                        Type = "IMPORT",
+                        ExpiryDate = batch.ExpiryDate,
+                        BatchNumber = batch.BatchNumber,
+                        Note = batch.Note,
+                        CreatedAt = now
+                    }, cancellationToken);
+                }
+
+                await _medicineRepository.SaveChangesAsync(cancellationToken);
+                await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+                await _medicineRepository.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await tx.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             await _logWriter.WriteAsync(new SystemLogWriteRequest
             {
-                ActorUserId = null,
+                ActorUserId = performedByUserId > 0 ? performedByUserId : null,
                 Module = "MEDICINES",
                 Action = "CREATE_MEDICINE",
                 TargetType = "Medicine",
@@ -331,36 +443,61 @@ namespace EduHealth.Services.Implementations
                 return (false, "Không tìm thấy thuốc.", new[] { ("id", "MEDICINE_NOT_FOUND", "Không tồn tại thuốc với id đã cung cấp.") }, null);
             }
 
+            await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+
             var stockBefore = medicine.StockQuantity;
-            medicine.StockQuantity += request.Quantity;
-            medicine.UpdatedAt = VietnamTimeHelper.Now;
+            var now = VietnamTimeHelper.Now;
+            var batch = new MedicineBatch
+            {
+                Code = GenerateTemporaryBatchCode(),
+                MedicineId = medicine.MedicineId,
+                BatchNumber = request.BatchNumber?.Trim(),
+                ReceivedAt = now,
+                ExpiryDate = request.ExpiryDate,
+                InitialQuantity = request.Quantity,
+                RemainingQuantity = request.Quantity,
+                Status = "ACTIVE",
+                Note = request.Note?.Trim(),
+                CreatedByUserId = performedByUserId,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            await _medicineRepository.AddBatchAsync(batch, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+            batch.Code = $"MBT{batch.MedicineBatchId:D6}";
 
             var log = new MedicineStockLog
             {
                 MedicineId = medicine.MedicineId,
+                MedicineBatchId = batch.MedicineBatchId,
                 UserId = performedByUserId,
                 Quantity = request.Quantity,
                 StockBefore = stockBefore,
-                StockAfter = medicine.StockQuantity,
+                StockAfter = stockBefore + request.Quantity,
                 Type = "IMPORT",
                 Reason = null,
-                ExpiryDate = request.ExpiryDate,
-                BatchNumber = request.BatchNumber?.Trim(),
-                Note = request.Note?.Trim(),
-                CreatedAt = VietnamTimeHelper.Now
+                ExpiryDate = batch.ExpiryDate,
+                BatchNumber = batch.BatchNumber,
+                Note = batch.Note,
+                CreatedAt = now
             };
 
-            _medicineRepository.Update(medicine);
             await _medicineRepository.AddMovementAsync(log, cancellationToken);
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+            await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
 
             await _logWriter.WriteAsync(new SystemLogWriteRequest
             {
                 ActorUserId = performedByUserId,
                 Module = "MEDICINES",
                 Action = "STOCK_IN",
-                TargetType = "Medicine",
-                TargetId = medicine.Code,
+                TargetType = "MedicineBatch",
+                TargetId = batch.Code,
                 TargetLabel = medicine.Name,
                 Description = $"Nhập kho thuốc {medicine.Name}",
                 Status = "SUCCESS",
@@ -378,6 +515,7 @@ namespace EduHealth.Services.Implementations
             return (true, "Nhập kho thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {
                 MedicineId = medicine.Code,
+                BatchId = batch.Code,
                 MovementId = $"MSL{log.LogId:D3}",
                 Type = log.Type,
                 Quantity = log.Quantity,
@@ -413,33 +551,80 @@ namespace EduHealth.Services.Implementations
                 return (false, "Không tìm thấy thuốc.", new[] { ("id", "MEDICINE_NOT_FOUND", "Không tồn tại thuốc với id đã cung cấp.") }, null);
             }
 
-            if (request.Quantity > medicine.StockQuantity)
+            await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+
+            List<MedicineBatch> batches;
+            if (!string.IsNullOrWhiteSpace(request.BatchId))
+            {
+                var selectedBatch = await _medicineRepository.GetBatchByCodeAsync(medicine.MedicineId, request.BatchId, cancellationToken);
+                if (selectedBatch is null)
+                    return (false, "Batch not found.", new[] { ("batchId", "MEDICINE_BATCH_NOT_FOUND", "The requested batch does not exist.") }, null);
+                batches = new List<MedicineBatch> { selectedBatch };
+            }
+            else
+            {
+                batches = await _medicineRepository.GetAvailableBatchesAsync(medicine.MedicineId, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(request.BatchNumber))
+                    batches = batches.Where(x => x.BatchNumber == request.BatchNumber.Trim()).ToList();
+            }
+
+            var disposableStock = batches
+                .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0)
+                .Sum(x => x.RemainingQuantity);
+
+            if (request.Quantity > disposableStock)
             {
                 return (false, "Số lượng hủy không hợp lệ.", new[] { ("quantity", "DISPOSE_QUANTITY_EXCEEDS_STOCK", "Số lượng hủy vượt quá số lượng tồn kho.") }, null);
             }
 
             var stockBefore = medicine.StockQuantity;
-            medicine.StockQuantity -= request.Quantity;
-            medicine.UpdatedAt = VietnamTimeHelper.Now;
+            var stockCursor = stockBefore;
+            var remainingToDispose = request.Quantity;
+            var logs = new List<MedicineStockLog>();
+            var now = VietnamTimeHelper.Now;
 
-            var log = new MedicineStockLog
+            foreach (var batch in batches.OrderBy(x => x.ExpiryDate).ThenBy(x => x.ReceivedAt))
             {
-                MedicineId = medicine.MedicineId,
-                UserId = performedByUserId,
-                Quantity = request.Quantity,
-                StockBefore = stockBefore,
-                StockAfter = medicine.StockQuantity,
-                Type = "DISPOSE",
-                Reason = request.Reason.Trim().ToUpperInvariant(),
-                ExpiryDate = request.ExpiryDate,
-                BatchNumber = request.BatchNumber?.Trim(),
-                Note = request.Note?.Trim(),
-                CreatedAt = VietnamTimeHelper.Now
-            };
+                if (remainingToDispose == 0)
+                    break;
 
-            _medicineRepository.Update(medicine);
-            await _medicineRepository.AddMovementAsync(log, cancellationToken);
+                var quantity = Math.Min(batch.RemainingQuantity, remainingToDispose);
+                var affectsAvailableStock = batch.Status == "ACTIVE" &&
+                    batch.ExpiryDate >= VietnamTimeHelper.TodayDateOnly;
+                batch.RemainingQuantity -= quantity;
+                batch.Status = batch.RemainingQuantity == 0 ? "DISPOSED" : "ACTIVE";
+                batch.UpdatedAt = now;
+                remainingToDispose -= quantity;
+                var movementStockBefore = stockCursor;
+                if (affectsAvailableStock)
+                    stockCursor -= quantity;
+
+                var batchLog = new MedicineStockLog
+                {
+                    MedicineId = medicine.MedicineId,
+                    MedicineBatchId = batch.MedicineBatchId,
+                    UserId = performedByUserId,
+                    Quantity = quantity,
+                    StockBefore = movementStockBefore,
+                    StockAfter = stockCursor,
+                    Type = "DISPOSE",
+                    Reason = request.Reason.Trim().ToUpperInvariant(),
+                    ExpiryDate = batch.ExpiryDate,
+                    BatchNumber = batch.BatchNumber,
+                    Note = request.Note?.Trim(),
+                    CreatedAt = now
+                };
+                logs.Add(batchLog);
+                await _medicineRepository.AddMovementAsync(batchLog, cancellationToken);
+            }
+
             await _medicineRepository.SaveChangesAsync(cancellationToken);
+            await _medicineRepository.RecalculateInventoryAsync(medicine, cancellationToken);
+            await _medicineRepository.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            var log = logs[0];
 
             await _logWriter.WriteAsync(new SystemLogWriteRequest
             {
@@ -466,11 +651,12 @@ namespace EduHealth.Services.Implementations
             return (true, "Hủy thuốc thành công.", Array.Empty<(string, string, string)>(), new StockMovementResponseDto
             {
                 MedicineId = medicine.Code,
+                BatchId = logs.Count == 1 ? batches[0].Code : null,
                 MovementId = $"MSL{log.LogId:D3}",
                 Type = log.Type,
-                Quantity = log.Quantity,
-                StockBefore = log.StockBefore,
-                StockAfter = log.StockAfter,
+                Quantity = request.Quantity,
+                StockBefore = stockBefore,
+                StockAfter = medicine.StockQuantity,
                 ExpiryDate = log.ExpiryDate,
                 BatchNumber = log.BatchNumber,
                 Reason = log.Reason,
@@ -499,6 +685,7 @@ namespace EduHealth.Services.Implementations
             var items = logs.Select(x => new MedicineMovementItemDto
             {
                 MovementId = $"MSL{x.LogId:D3}",
+                BatchId = x.MedicineBatch?.Code,
                 Type = x.Type,
                 Quantity = x.Quantity,
                 StockBefore = x.StockBefore,
@@ -530,7 +717,7 @@ namespace EduHealth.Services.Implementations
 
             foreach (var m in items)
             {
-                var nearestExpiry = await _medicineRepository.GetNearestExpiryDateAsync(m.MedicineId, cancellationToken);
+                var nearestExpiry = m.NearestExpiryDate;
                 var isLow = m.StockQuantity <= m.WarningThreshold;
                 var isExp = nearestExpiry.HasValue && nearestExpiry.Value <= threshold;
 
@@ -570,6 +757,11 @@ namespace EduHealth.Services.Implementations
             }
 
             return result;
+        }
+
+        private static string GenerateTemporaryBatchCode()
+        {
+            return $"TMP{Guid.NewGuid():N}"[..20];
         }
     }
 }

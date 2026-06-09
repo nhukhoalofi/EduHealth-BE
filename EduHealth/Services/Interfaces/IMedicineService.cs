@@ -6,7 +6,7 @@ namespace EduHealth.Services.Interfaces
     {
         Task<(IReadOnlyList<MedicineListItemDto> Items, int TotalItems, int TotalPages, int Page, int PageSize)> GetPagedAsync(MedicineListQueryDto query, CancellationToken cancellationToken = default);
         Task<(bool Found, MedicineDetailDto? Data)> GetDetailAsync(string id, CancellationToken cancellationToken = default);
-        Task<(bool Success, int? StatusCode, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, MedicineDetailDto? Data)> CreateAsync(CreateMedicineRequestDto request, CancellationToken cancellationToken = default);
+        Task<(bool Success, int? StatusCode, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, MedicineDetailDto? Data)> CreateAsync(int performedByUserId, CreateMedicineRequestDto request, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateAsync(string id, UpdateMedicineRequestDto request, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, object? Data)> UpdateStatusAsync(string id, UpdateMedicineStatusRequestDto request, CancellationToken cancellationToken = default);
         Task<(bool Success, string Message, IReadOnlyList<(string Field, string Code, string Message)> Errors, StockMovementResponseDto? Data)> StockInAsync(string id, int performedByUserId, StockInMedicineRequestDto request, CancellationToken cancellationToken = default);

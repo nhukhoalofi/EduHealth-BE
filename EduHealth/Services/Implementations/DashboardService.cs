@@ -18,6 +18,7 @@ namespace EduHealth.Services.Implementations
         public async Task<AdminDashboardOverviewDto> GetAdminOverviewAsync()
         {
             var today = VietnamTimeHelper.Now.Date;
+            var todayDateOnly = DateOnly.FromDateTime(today);
             var startOfMonth = new DateTime(today.Year, today.Month, 1);
 
             return new AdminDashboardOverviewDto
@@ -28,7 +29,10 @@ namespace EduHealth.Services.Implementations
                 ActiveUsers = await _context.Users.CountAsync(u => u.Status == "ACTIVE"),
                 LockedUsers = await _context.Users.CountAsync(u => u.Status == "LOCKED"),
                 TotalMedicines = await _context.Medicines.CountAsync(),
-                LowStockMedicinesCount = await _context.Medicines.CountAsync(m => m.StockQuantity <= m.WarningThreshold),
+                LowStockMedicinesCount = await _context.Medicines.CountAsync(m =>
+                    (m.MedicineBatches
+                        .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= todayDateOnly)
+                        .Sum(b => (int?)b.RemainingQuantity) ?? 0) <= m.WarningThreshold),
                 TotalVisitsToday = await _context.HealthVisits.CountAsync(v => v.VisitDate >= today),
                 TotalVisitsThisMonth = await _context.HealthVisits.CountAsync(v => v.VisitDate >= startOfMonth),
                 VaccinationCampaignsActive = await _context.VaccinationCampaigns.CountAsync(c => c.Status == "ACTIVE")
@@ -57,48 +61,49 @@ namespace EduHealth.Services.Implementations
                 })
                 .ToListAsync();
 
-            var lowStockMedicines = await _context.Medicines
-                .Where(m => m.StockQuantity <= m.WarningThreshold)
-                .Select(m => new MedicineAlertDto
+            var medicineInventory = _context.Medicines
+                .Select(m => new
                 {
-                    MedicineId = m.MedicineId,
-                    Code = m.Code,
-                    Name = m.Name,
-                    StockQuantity = m.StockQuantity,
-                    WarningThreshold = m.WarningThreshold,
-                    ExpiryDate = null
+                    Medicine = m,
+                    StockQuantity = m.MedicineBatches
+                        .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= todayDateOnly)
+                        .Sum(b => (int?)b.RemainingQuantity) ?? 0,
+                    NearestExpiryDate = m.MedicineBatches
+                        .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= todayDateOnly)
+                        .Min(b => (DateOnly?)b.ExpiryDate)
+                });
+
+            var lowStockMedicines = await medicineInventory
+                .Where(x => x.StockQuantity <= x.Medicine.WarningThreshold)
+                .Select(x => new MedicineAlertDto
+                {
+                    MedicineId = x.Medicine.MedicineId,
+                    Code = x.Medicine.Code,
+                    Name = x.Medicine.Name,
+                    StockQuantity = x.StockQuantity,
+                    WarningThreshold = x.Medicine.WarningThreshold,
+                    ExpiryDate = x.NearestExpiryDate.HasValue
+                        ? x.NearestExpiryDate.Value.ToDateTime(TimeOnly.MinValue)
+                        : null
                 })
                 .ToListAsync();
 
-            var expiringLogsQuery = await _context.MedicineStockLogs
-                .Include(l => l.Medicine)
-                .Where(l => l.Type == "IMPORT" && l.ExpiryDate != null && l.ExpiryDate <= thirtyDaysFromNow && l.ExpiryDate >= todayDateOnly)
-                .OrderBy(l => l.ExpiryDate)
+            var expiringMedicines = await medicineInventory
+                .Where(x => x.NearestExpiryDate >= todayDateOnly && x.NearestExpiryDate <= thirtyDaysFromNow)
+                .OrderBy(x => x.NearestExpiryDate)
                 .Take(10)
-                .Select(l => new 
+                .Select(x => new MedicineAlertDto
                 {
-                    l.MedicineId,
-                    l.Medicine.Code,
-                    l.Medicine.Name,
-                    l.Medicine.StockQuantity,
-                    l.Medicine.WarningThreshold,
-                    l.ExpiryDate
+                    MedicineId = x.Medicine.MedicineId,
+                    Code = x.Medicine.Code,
+                    Name = x.Medicine.Name,
+                    StockQuantity = x.StockQuantity,
+                    WarningThreshold = x.Medicine.WarningThreshold,
+                    ExpiryDate = x.NearestExpiryDate.HasValue
+                        ? x.NearestExpiryDate.Value.ToDateTime(TimeOnly.MinValue)
+                        : null
                 })
                 .ToListAsync();
-
-            var expiringMedicines = expiringLogsQuery
-                .GroupBy(l => l.MedicineId)
-                .Select(g => g.First())
-                .Select(l => new MedicineAlertDto
-                {
-                    MedicineId = l.MedicineId,
-                    Code = l.Code,
-                    Name = l.Name,
-                    StockQuantity = l.StockQuantity,
-                    WarningThreshold = l.WarningThreshold,
-                    ExpiryDate = l.ExpiryDate?.ToDateTime(TimeOnly.MinValue)
-                })
-                .ToList();
 
             var pendingVaccinationsCount = await _context.StudentVaccinations
                 .CountAsync(v => v.Status == "PENDING" || v.Status == "NOT_VACCINATED");

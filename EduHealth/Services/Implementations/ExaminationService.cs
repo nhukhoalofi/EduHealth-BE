@@ -5,6 +5,7 @@ using EduHealth.Helpers;
 using EduHealth.Repositories.Interfaces;
 using EduHealth.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace EduHealth.Services.Implementations
 {
@@ -183,7 +184,7 @@ namespace EduHealth.Services.Implementations
             var prescriptions = request.Prescriptions?.ToList() ?? new List<CreateExaminationPrescriptionItemDto>();
 
             // Transaction
-            await using var tx = await _context.Database.BeginTransactionAsync(cancellationToken);
+            await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             try
             {
                 var visit = new HealthVisit
@@ -213,6 +214,7 @@ namespace EduHealth.Services.Implementations
                 var createdPrescriptions = new List<VisitPrescription>();
                 var inventoryMovements = new List<MedicineStockLog>();
                 var meds = new Dictionary<string, Medicine>(StringComparer.OrdinalIgnoreCase);
+                var availableBatches = new Dictionary<int, List<MedicineBatch>>();
 
                 if (prescriptions.Count > 0)
                 {
@@ -233,12 +235,31 @@ namespace EduHealth.Services.Implementations
                         meds[med.Code] = med;
                     }
 
+                    var requestedByMedicine = prescriptions
+                        .GroupBy(x => x.MedicineId, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(x => x.Key, x => x.Sum(y => y.Quantity), StringComparer.OrdinalIgnoreCase);
+
                     for (var i = 0; i < prescriptions.Count; i++)
                     {
                         var item = prescriptions[i];
                         var med = meds[item.MedicineId];
 
-                        if (item.Quantity > med.StockQuantity)
+                        if (!availableBatches.TryGetValue(med.MedicineId, out var batches))
+                        {
+                            var today = VietnamTimeHelper.TodayDateOnly;
+                            batches = await _context.MedicineBatches
+                                .Where(x =>
+                                    x.MedicineId == med.MedicineId &&
+                                    x.Status == "ACTIVE" &&
+                                    x.RemainingQuantity > 0 &&
+                                    x.ExpiryDate >= today)
+                                .OrderBy(x => x.ExpiryDate)
+                                .ThenBy(x => x.ReceivedAt)
+                                .ToListAsync(cancellationToken);
+                            availableBatches[med.MedicineId] = batches;
+                        }
+
+                        if (requestedByMedicine[item.MedicineId] > batches.Sum(x => x.RemainingQuantity))
                         {
                             return (false, 400, "Dữ liệu không hợp lệ.", new[] { ($"prescriptions[{i}].quantity", "INSUFFICIENT_STOCK", "Số lượng thuốc trong kho không đủ.") }, null);
                         }
@@ -247,9 +268,12 @@ namespace EduHealth.Services.Implementations
                     foreach (var item in prescriptions)
                     {
                         var med = meds[item.MedicineId];
-                        var stockBefore = med.StockQuantity;
-                        med.StockQuantity -= item.Quantity;
-                        med.UpdatedAt = VietnamTimeHelper.Now;
+                        var stockBefore = availableBatches[med.MedicineId]
+                            .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0)
+                            .Sum(x => x.RemainingQuantity);
+                        var stockCursor = stockBefore;
+                        var remainingToDispense = item.Quantity;
+                        var now = VietnamTimeHelper.Now;
 
                         createdPrescriptions.Add(new VisitPrescription
                         {
@@ -259,21 +283,45 @@ namespace EduHealth.Services.Implementations
                             UsageIns = item.UsageInstruction
                         });
 
-                        inventoryMovements.Add(new MedicineStockLog
+                        foreach (var batch in availableBatches[med.MedicineId])
                         {
-                            MedicineId = med.MedicineId,
-                            UserId = nurseUserId,
-                            Quantity = item.Quantity,
-                            StockBefore = stockBefore,
-                            StockAfter = med.StockQuantity,
-                            Type = "DISPENSE",
-                            Reason = null,
-                            ExpiryDate = null,
-                            BatchNumber = null,
-                            Note = null,
-                            VisitId = visit.VisitId,
-                            CreatedAt = VietnamTimeHelper.Now
-                        });
+                            if (remainingToDispense == 0)
+                                break;
+
+                            var quantity = Math.Min(batch.RemainingQuantity, remainingToDispense);
+                            batch.RemainingQuantity -= quantity;
+                            batch.Status = batch.RemainingQuantity == 0 ? "DEPLETED" : "ACTIVE";
+                            batch.UpdatedAt = now;
+                            remainingToDispense -= quantity;
+                            stockCursor -= quantity;
+
+                            inventoryMovements.Add(new MedicineStockLog
+                            {
+                                MedicineId = med.MedicineId,
+                                MedicineBatchId = batch.MedicineBatchId,
+                                UserId = nurseUserId,
+                                Quantity = quantity,
+                                StockBefore = stockCursor + quantity,
+                                StockAfter = stockCursor,
+                                Type = "DISPENSE",
+                                Reason = null,
+                                ExpiryDate = batch.ExpiryDate,
+                                BatchNumber = batch.BatchNumber,
+                                Note = null,
+                                VisitId = visit.VisitId,
+                                CreatedAt = now
+                            });
+                        }
+
+                        med.StockQuantity = availableBatches[med.MedicineId]
+                            .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0)
+                            .Sum(x => x.RemainingQuantity);
+                        med.NearestExpiryDate = availableBatches[med.MedicineId]
+                            .Where(x => x.Status == "ACTIVE" && x.RemainingQuantity > 0)
+                            .OrderBy(x => x.ExpiryDate)
+                            .Select(x => (DateOnly?)x.ExpiryDate)
+                            .FirstOrDefault();
+                        med.UpdatedAt = now;
                     }
 
                     await _examinationRepository.AddPrescriptionsAsync(createdPrescriptions, cancellationToken);
@@ -331,6 +379,9 @@ namespace EduHealth.Services.Implementations
                         {
                             MovementId = $"MSL{m.LogId:D3}",
                             MedicineId = med?.Code ?? string.Empty,
+                            BatchId = availableBatches.TryGetValue(m.MedicineId, out var batches)
+                                ? batches.FirstOrDefault(x => x.MedicineBatchId == m.MedicineBatchId)?.Code
+                                : null,
                             Type = m.Type,
                             Quantity = m.Quantity
                         };

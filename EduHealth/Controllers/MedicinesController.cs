@@ -40,7 +40,9 @@ namespace EduHealth.Controllers
         [Authorize(Roles = "NURSE")]
         public async Task<IActionResult> Create([FromBody] CreateMedicineRequestDto request, CancellationToken cancellationToken)
         {
-            var (success, statusCode, message, errors, data) = await _medicineService.CreateAsync(request, cancellationToken);
+            var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            _ = int.TryParse(userIdClaim, out var userId);
+            var (success, statusCode, message, errors, data) = await _medicineService.CreateAsync(userId, request, cancellationToken);
 
             if (!success)
             {
@@ -54,7 +56,7 @@ namespace EduHealth.Controllers
                 });
             }
 
-            return StatusCode(201, new ApiResponseV2<MedicineDetailDto>
+            return StatusCode(statusCode ?? 201, new ApiResponseV2<MedicineDetailDto>
             {
                 Success = true,
                 Message = message,

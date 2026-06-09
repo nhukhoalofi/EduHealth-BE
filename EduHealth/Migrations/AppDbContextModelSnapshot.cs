@@ -406,6 +406,68 @@ namespace EduHealth.Migrations
                     b.ToTable("Medicines", (string)null);
                 });
 
+            modelBuilder.Entity("EduHealth.Data.Entities.MedicineBatch", b =>
+                {
+                    b.Property<int>("MedicineBatchId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("MedicineBatchId"));
+
+                    b.Property<string>("BatchNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly>("ExpiryDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("InitialQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MedicineId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("datetime");
+
+                    b.Property<int>("RemainingQuantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime");
+
+                    b.HasKey("MedicineBatchId");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("MedicineId", "ExpiryDate", "Status");
+
+                    b.ToTable("MedicineBatches", (string)null);
+                });
+
             modelBuilder.Entity("EduHealth.Data.Entities.MedicineStockLog", b =>
                 {
                     b.Property<int>("LogId")
@@ -423,6 +485,9 @@ namespace EduHealth.Migrations
 
                     b.Property<DateOnly?>("ExpiryDate")
                         .HasColumnType("date");
+
+                    b.Property<int?>("MedicineBatchId")
+                        .HasColumnType("int");
 
                     b.Property<int>("MedicineId")
                         .HasColumnType("int");
@@ -456,6 +521,8 @@ namespace EduHealth.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("LogId");
+
+                    b.HasIndex("MedicineBatchId");
 
                     b.HasIndex("MedicineId");
 
@@ -1201,8 +1268,31 @@ namespace EduHealth.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("EduHealth.Data.Entities.MedicineBatch", b =>
+                {
+                    b.HasOne("EduHealth.Data.Entities.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("EduHealth.Data.Entities.Medicine", "Medicine")
+                        .WithMany("MedicineBatches")
+                        .HasForeignKey("MedicineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Medicine");
+                });
+
             modelBuilder.Entity("EduHealth.Data.Entities.MedicineStockLog", b =>
                 {
+                    b.HasOne("EduHealth.Data.Entities.MedicineBatch", "MedicineBatch")
+                        .WithMany("StockLogs")
+                        .HasForeignKey("MedicineBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("EduHealth.Data.Entities.Medicine", "Medicine")
                         .WithMany("MedicineStockLogs")
                         .HasForeignKey("MedicineId")
@@ -1216,6 +1306,8 @@ namespace EduHealth.Migrations
                         .IsRequired();
 
                     b.Navigation("Medicine");
+
+                    b.Navigation("MedicineBatch");
 
                     b.Navigation("User");
                 });
@@ -1435,9 +1527,16 @@ namespace EduHealth.Migrations
 
             modelBuilder.Entity("EduHealth.Data.Entities.Medicine", b =>
                 {
+                    b.Navigation("MedicineBatches");
+
                     b.Navigation("MedicineStockLogs");
 
                     b.Navigation("VisitPrescriptions");
+                });
+
+            modelBuilder.Entity("EduHealth.Data.Entities.MedicineBatch", b =>
+                {
+                    b.Navigation("StockLogs");
                 });
 
             modelBuilder.Entity("EduHealth.Data.Entities.Notification", b =>

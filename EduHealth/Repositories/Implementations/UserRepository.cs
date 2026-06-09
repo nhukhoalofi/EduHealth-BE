@@ -31,6 +31,14 @@ namespace EduHealth.Repositories.Implementations
                 .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
         }
 
+        public async Task<Student?> GetStudentByUserIdAsync(int userId, CancellationToken cancellationToken = default)
+        {
+            return await _context.Students
+                .AsNoTracking()
+                .Include(x => x.Class)
+                .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+        }
+
         public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
         {
             email = email.Trim();

@@ -3,6 +3,7 @@ namespace EduHealth.DTOs.Medicines
     public class MedicineMovementItemDto
     {
         public string MovementId { get; set; } = null!;
+        public string? BatchId { get; set; }
         public string Type { get; set; } = null!;
         public int Quantity { get; set; }
         public int StockBefore { get; set; }

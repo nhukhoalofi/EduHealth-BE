@@ -574,7 +574,18 @@ namespace EduHealth.Services.Implementations
                 ? new Dictionary<int, (string Name, string? ActiveIngredient, string Unit, string? Packaging, int Stock, int Warning)>()
                 : await _context.Medicines.AsNoTracking()
                     .Where(m => medicineIds.Contains(m.MedicineId))
-                    .Select(m => new { m.MedicineId, m.Name, m.ActiveIngredient, m.Unit, m.Packaging, m.StockQuantity, m.WarningThreshold })
+                    .Select(m => new
+                    {
+                        m.MedicineId,
+                        m.Name,
+                        m.ActiveIngredient,
+                        m.Unit,
+                        m.Packaging,
+                        StockQuantity = m.MedicineBatches
+                            .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= VietnamTimeHelper.TodayDateOnly)
+                            .Sum(b => (int?)b.RemainingQuantity) ?? 0,
+                        m.WarningThreshold
+                    })
                     .ToDictionaryAsync(
                         x => x.MedicineId,
                         x => (Name: x.Name, ActiveIngredient: x.ActiveIngredient, Unit: x.Unit, Packaging: x.Packaging, Stock: x.StockQuantity, Warning: x.WarningThreshold),
@@ -844,16 +855,24 @@ namespace EduHealth.Services.Implementations
                 }
             }
 
+            var todayForInventory = VietnamTimeHelper.TodayDateOnly;
             var lowSupplies = await _context.Medicines.AsNoTracking()
-                .Where(m => m.StockQuantity <= m.WarningThreshold)
-                .OrderBy(m => m.StockQuantity)
-                .Select(m => new LowSupplyDto
+                .Select(m => new
                 {
-                    Id = $"sup-{m.MedicineId}",
-                    Name = m.Name,
-                    Remaining = m.StockQuantity.ToString(),
-                    Tone = m.StockQuantity == 0 ? "danger" : "warning",
-                    ThresholdLabel = $"Ngưỡng tối thiểu: {m.WarningThreshold}"
+                    Medicine = m,
+                    Stock = m.MedicineBatches
+                        .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= todayForInventory)
+                        .Sum(b => (int?)b.RemainingQuantity) ?? 0
+                })
+                .Where(x => x.Stock <= x.Medicine.WarningThreshold)
+                .OrderBy(x => x.Stock)
+                .Select(x => new LowSupplyDto
+                {
+                    Id = $"sup-{x.Medicine.MedicineId}",
+                    Name = x.Medicine.Name,
+                    Remaining = x.Stock.ToString(),
+                    Tone = x.Stock == 0 ? "danger" : "warning",
+                    ThresholdLabel = $"Ngưỡng tối thiểu: {x.Medicine.WarningThreshold}"
                 })
                 .ToListAsync(cancellationToken);
 
@@ -1614,26 +1633,33 @@ namespace EduHealth.Services.Implementations
                         TimeLabel = g.Max(x => x.VisitDate).ToString("dd/MM/yyyy HH:mm")
                     }));
 
+            var today = VietnamTimeHelper.TodayDateOnly;
             alerts.AddRange(await _context.Medicines.AsNoTracking()
-                .Where(m => m.StockQuantity <= m.WarningThreshold)
-                .OrderBy(m => m.StockQuantity)
-                .Take(10)
-                .Select(m => new NurseRiskAlertDto
+                .Select(m => new
                 {
-                    Id = $"low-stock-{m.MedicineId}",
+                    Medicine = m,
+                    Stock = m.MedicineBatches
+                        .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= today)
+                        .Sum(b => (int?)b.RemainingQuantity) ?? 0
+                })
+                .Where(x => x.Stock <= x.Medicine.WarningThreshold)
+                .OrderBy(x => x.Stock)
+                .Take(10)
+                .Select(x => new NurseRiskAlertDto
+                {
+                    Id = $"low-stock-{x.Medicine.MedicineId}",
                     Tone = "warning",
-                    Title = $"Thuốc tồn thấp: {m.Name}",
-                    Message = $"Tồn kho {m.StockQuantity}, ngưỡng {m.WarningThreshold}.",
+                    Title = $"Thuốc tồn thấp: {x.Medicine.Name}",
+                    Message = $"Tồn kho {x.Stock}, ngưỡng {x.Medicine.WarningThreshold}.",
                     TimeLabel = VietnamTimeHelper.Now.ToString("dd/MM/yyyy HH:mm")
                 })
                 .ToListAsync(cancellationToken));
 
-            var today = VietnamTimeHelper.TodayDateOnly;
             var near = today.AddDays(30);
 
-            var expiring = await _context.MedicineStockLogs.AsNoTracking()
-                .Where(l => l.ExpiryDate.HasValue && l.ExpiryDate.Value >= today && l.ExpiryDate.Value <= near)
-                .GroupBy(l => l.MedicineId)
+            var expiring = await _context.MedicineBatches.AsNoTracking()
+                .Where(b => b.Status == "ACTIVE" && b.RemainingQuantity > 0 && b.ExpiryDate >= today && b.ExpiryDate <= near)
+                .GroupBy(b => b.MedicineId)
                 .Select(g => new { MedicineId = g.Key, ExpiryDate = g.Min(x => x.ExpiryDate) })
                 .ToListAsync(cancellationToken);
 

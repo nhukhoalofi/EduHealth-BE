@@ -14,6 +14,7 @@ namespace EduHealth.DTOs.Medicines
         public string? Note { get; set; }
         public bool IsLowStock { get; set; }
         public bool IsExpiringSoon { get; set; }
+        public IReadOnlyList<MedicineBatchItemDto> Batches { get; set; } = Array.Empty<MedicineBatchItemDto>();
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

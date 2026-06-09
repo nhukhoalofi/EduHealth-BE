@@ -102,18 +102,7 @@ namespace EduHealth.Services.Implementations
                 return null;
             }
 
-            return new MeResponseDto
-            {
-                UserId = user.UserId,
-                Username = user.Username,
-                FullName = user.FullName,
-                Email = user.Email,
-                Phone = user.Phone,
-                Role = user.Role,
-                IsActive = user.IsActive,
-                Status = user.Status,
-                Avatar = user.Avatar
-            };
+            return await BuildMeResponseAsync(user, cancellationToken);
         }
 
         public Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
@@ -453,7 +442,37 @@ namespace EduHealth.Services.Implementations
                 Metadata = new { }
             }, cancellationToken);
 
-            var response = new MeResponseDto
+            var response = await BuildMeResponseAsync(user, cancellationToken);
+
+            return (true, "Cập nhật hồ sơ cá nhân thành công.", string.Empty, response);
+        }
+
+        private async Task<MeResponseDto> BuildMeResponseAsync(User user, CancellationToken cancellationToken)
+        {
+            StudentPersonalProfileDto? studentProfile = null;
+            if (string.Equals(user.Role, "STUDENT", StringComparison.OrdinalIgnoreCase))
+            {
+                var student = await _userRepository.GetStudentByUserIdAsync(user.UserId, cancellationToken);
+                if (student is not null)
+                {
+                    studentProfile = new StudentPersonalProfileDto
+                    {
+                        StudentId = student.Code,
+                        DateOfBirth = student.DateOfBirth,
+                        ClassId = student.ClassId,
+                        ClassCode = student.Class.Code,
+                        ClassName = student.Class.ClassName,
+                        Grade = student.Class.Grade,
+                        CurrentHeight = student.CurrentHeight,
+                        CurrentWeight = student.CurrentWeight,
+                        Guardian = student.Guardian,
+                        GuardianPhone = student.Phone,
+                        MedicalHistoryNotes = student.MedicalHistoryNotes
+                    };
+                }
+            }
+
+            return new MeResponseDto
             {
                 UserId = user.UserId,
                 Username = user.Username,
@@ -463,10 +482,10 @@ namespace EduHealth.Services.Implementations
                 Role = user.Role,
                 IsActive = user.IsActive,
                 Status = user.Status,
-                Avatar = user.Avatar
+                Avatar = user.Avatar,
+                Gender = user.Gender,
+                StudentProfile = studentProfile
             };
-
-            return (true, "Cập nhật hồ sơ cá nhân thành công.", string.Empty, response);
         }
 
         public async Task<(bool Success, string Message, string Field, string? AvatarUrl)> UpdateAvatarAsync(int userId, IFormFile file, CancellationToken cancellationToken = default)

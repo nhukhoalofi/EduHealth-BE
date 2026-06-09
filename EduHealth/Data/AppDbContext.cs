@@ -17,6 +17,7 @@ namespace EduHealth.Data
         public DbSet<VaccinationCampaign> VaccinationCampaigns => Set<VaccinationCampaign>();
         public DbSet<VaccinationCampaignTargetClass> VaccinationCampaignTargetClasses => Set<VaccinationCampaignTargetClass>();
         public DbSet<Medicine> Medicines => Set<Medicine>();
+        public DbSet<MedicineBatch> MedicineBatches => Set<MedicineBatch>();
         public DbSet<Student> Students => Set<Student>();
 
         public DbSet<StudentAllergy> StudentAllergies => Set<StudentAllergy>();

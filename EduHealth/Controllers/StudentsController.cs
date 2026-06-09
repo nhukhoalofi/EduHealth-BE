@@ -83,7 +83,7 @@ namespace EduHealth.Controllers
         }
 
         [HttpPatch("{id:int}")]
-        [Authorize(Roles = "NURSE")]
+        [Authorize(Roles = "ADMIN,NURSE")]
         public async Task<IActionResult> UpdateStudent([FromRoute] int id, [FromBody] StudentUpdateRequestDto request, CancellationToken cancellationToken)
         {
             var result = await _studentService.UpdateStudentAsync(id, request, cancellationToken);

@@ -50,6 +50,11 @@ namespace EduHealth.Data.Configurations
                 .HasForeignKey(x => x.MedicineId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            builder.HasOne(x => x.MedicineBatch)
+                .WithMany(x => x.StockLogs)
+                .HasForeignKey(x => x.MedicineBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             builder.HasOne(x => x.User)
                 .WithMany(u => u.MedicineStockLogs)
                 .HasForeignKey(x => x.UserId)

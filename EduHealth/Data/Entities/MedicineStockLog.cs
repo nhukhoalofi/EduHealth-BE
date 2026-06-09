@@ -4,6 +4,7 @@
     {
         public int LogId { get; set; }
         public int MedicineId { get; set; }
+        public int? MedicineBatchId { get; set; }
         public int UserId { get; set; }
         public int Quantity { get; set; }
         public int StockBefore { get; set; }
@@ -18,6 +19,7 @@
 
         // Navigation
         public Medicine Medicine { get; set; } = null!;
+        public MedicineBatch? MedicineBatch { get; set; }
         public User User { get; set; } = null!;
     }
 }

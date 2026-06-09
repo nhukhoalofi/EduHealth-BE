@@ -19,5 +19,6 @@
         // Navigation
         public ICollection<VisitPrescription> VisitPrescriptions { get; set; } = new List<VisitPrescription>();
         public ICollection<MedicineStockLog> MedicineStockLogs { get; set; } = new List<MedicineStockLog>();
+        public ICollection<MedicineBatch> MedicineBatches { get; set; } = new List<MedicineBatch>();
     }
 }
