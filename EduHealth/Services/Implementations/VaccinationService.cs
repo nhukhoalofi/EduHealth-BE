@@ -164,10 +164,50 @@ namespace EduHealth.Services.Implementations
 
             if (targetType == "CLASS")
             {
-                var classCodes = request.TargetClassIds!.Select(x => x.Trim()).Where(x => x.Length > 0).Distinct().ToList();
-                var classes = await _context.SchoolClasses.Where(x => classCodes.Contains(x.Code)).ToListAsync(cancellationToken);
+                var requestedClassIds = request.TargetClassIds!
+                    .Select(x => x.Trim())
+                    .Where(x => x.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
-                if (classes.Count != classCodes.Count)
+                var allClasses = await _context.SchoolClasses.ToListAsync(cancellationToken);
+                var classByCode = allClasses.ToDictionary(x => x.Code, StringComparer.OrdinalIgnoreCase);
+                var classById = allClasses.ToDictionary(x => x.ClassId);
+                var classes = new List<SchoolClass>();
+                var missingClassIds = new List<string>();
+
+                foreach (var requestedClassId in requestedClassIds)
+                {
+                    if (classByCode.TryGetValue(requestedClassId, out var classByRequestedCode))
+                    {
+                        classes.Add(classByRequestedCode);
+                        continue;
+                    }
+
+                    if (int.TryParse(requestedClassId, out var numericClassId) &&
+                        classById.TryGetValue(numericClassId, out var classByNumericId))
+                    {
+                        classes.Add(classByNumericId);
+                        continue;
+                    }
+
+                    if (requestedClassId.StartsWith("CLS", StringComparison.OrdinalIgnoreCase) &&
+                        int.TryParse(requestedClassId[3..], out var legacyClassId) &&
+                        classById.TryGetValue(legacyClassId, out var classByLegacyId))
+                    {
+                        classes.Add(classByLegacyId);
+                        continue;
+                    }
+
+                    missingClassIds.Add(requestedClassId);
+                }
+
+                classes = classes
+                    .GroupBy(x => x.ClassId)
+                    .Select(x => x.First())
+                    .ToList();
+
+                if (missingClassIds.Count > 0)
                 {
                     return (false, 400, "Dữ liệu không hợp lệ.", new[] { ("targetClassIds", "CLASS_NOT_FOUND", "Có lớp không tồn tại." ) }, null);
                 }
@@ -358,6 +398,24 @@ namespace EduHealth.Services.Implementations
             }
 
             var status = request.Status.Trim().ToUpperInvariant();
+
+            if (entity.Status == "DONE")
+            {
+                return (false, 409, "Báº£n ghi Ä‘Ã£ hoÃ n táº¥t, khÃ´ng thá»ƒ cáº­p nháº­t.", new[] { ("status", "VACCINATION_ALREADY_DONE", "Báº£n ghi Ä‘Ã£ tiÃªm khÃ´ng thá»ƒ cáº­p nháº­t.") }, null);
+            }
+
+            if (status == "DONE")
+            {
+                if (!request.VaccinatedAt.HasValue)
+                {
+                    return (false, 400, "Dá»¯ liá»‡u khÃ´ng há»£p lá»‡.", new[] { ("vaccinatedAt", "REQUIRED", "vaccinatedAt lÃ  báº¯t buá»™c khi tráº¡ng thÃ¡i lÃ  DONE.") }, null);
+                }
+
+                if (request.VaccinatedAt.Value > DateOnly.FromDateTime(VietnamTimeHelper.Now))
+                {
+                    return (false, 400, "Dá»¯ liá»‡u khÃ´ng há»£p lá»‡.", new[] { ("vaccinatedAt", "FUTURE_DATE", "NgÃ y tiÃªm thá»±c táº¿ khÃ´ng Ä‘Æ°á»£c lá»›n hÆ¡n ngÃ y hiá»‡n táº¡i.") }, null);
+                }
+            }
 
             entity.Status = status;
             entity.VaccinatedAt = request.VaccinatedAt;

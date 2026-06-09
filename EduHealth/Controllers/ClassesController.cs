@@ -25,6 +25,7 @@ namespace EduHealth.Controllers
                 .Select(c => new
                 {
                     classId = c.ClassId,
+                    classCode = c.Code,
                     className = c.ClassName
                 })
                 .OrderBy(c => c.className)
