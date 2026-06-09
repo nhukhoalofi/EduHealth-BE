@@ -8,3 +8,8 @@ PBL3_EduHealth-FE/
 *.suo
 *.userosscache
 *.sln.docstates
+
+# Local application configuration may contain secrets.
+EduHealth/appsettings.json
+EduHealth/appsettings.Development.json
+!EduHealth/appsettings.example.json
